@@ -920,8 +920,11 @@ static char *kc_flow_template(const char *text, const kc_flow_store_t *flow, con
             const char *value;
             size_t end = i + 1;
             size_t name_len;
-            while (text[end] && text[end] != '>') {
-                end++;
+            int balance = 1;
+            while (text[end] && balance > 0) {
+                if (text[end] == '<') balance++;
+                else if (text[end] == '>') balance--;
+                if (balance > 0) end++;
             }
             if (text[end] != '>') {
                 free(out);
@@ -934,7 +937,11 @@ static char *kc_flow_template(const char *text, const kc_flow_store_t *flow, con
             }
             memcpy(name, text + i + 1, name_len);
             name[name_len] = '\0';
-            value = kc_flow_placeholder(name, flow, node);
+            {
+                char *res_name = kc_flow_template(name, flow, node);
+                value = kc_flow_placeholder(res_name ? res_name : name, flow, node);
+                free(res_name);
+            }
             if (!value) {
                 free(out);
                 return NULL;
@@ -1085,6 +1092,103 @@ static int kc_flow_set_env_store(const char *prefix, const kc_flow_store_t *stor
 #endif
 
 /**
+ * Parse a command string into an argv array.
+ * @param command Command string.
+ * @param out_argc Output argument count.
+ * @return Null-terminated array of strings, or NULL.
+ */
+static char **kc_flow_parse_argv(const char *command, int *out_argc) {
+    int argc = 0;
+    int cap = 8;
+    char **argv = (char **)malloc(cap * sizeof(char *));
+    const char *p = command;
+    if (!argv) return NULL;
+
+    while (*p) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        if (argc + 1 >= cap) {
+            char **next;
+            cap *= 2;
+            next = (char **)realloc(argv, cap * sizeof(char *));
+            if (!next) {
+                int i;
+                for (i = 0; i < argc; i++) free(argv[i]);
+                free(argv);
+                return NULL;
+            }
+            argv = next;
+        }
+        if (*p == '"') {
+            const char *start = ++p;
+            while (*p && *p != '"') p++;
+            argv[argc++] = kc_flow_dup_bytes(start, (size_t)(p - start));
+            if (*p == '"') p++;
+        } else {
+            const char *start = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            argv[argc++] = kc_flow_dup_bytes(start, (size_t)(p - start));
+        }
+    }
+    argv[argc] = NULL;
+    *out_argc = argc;
+    return argv;
+}
+
+/**
+ * Release an argv array.
+ * @param argv Null-terminated array pointer.
+ * @return None.
+ */
+static void kc_flow_free_argv(char **argv) {
+    int i;
+    if (!argv) return;
+    for (i = 0; argv[i]; i++) free(argv[i]);
+    free(argv);
+}
+
+/**
+ * Execute a built-in command internally.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @param in Input stream.
+ * @param out Output stream.
+ * @return KC_FLOW_OK on success, KC_FLOW_ERROR, or 1 if not a builtin.
+ */
+static int kc_flow_run_builtin(int argc, char **argv, FILE *in, FILE *out) {
+    if (argc == 0) return 1;
+    if (strcmp(argv[0], "echo") == 0) {
+        int i;
+        for (i = 1; i < argc; i++) {
+            fprintf(out, "%s%s", argv[i], (i + 1 < argc) ? " " : "");
+        }
+        fprintf(out, "\n");
+        return KC_FLOW_OK;
+    }
+    if (strcmp(argv[0], "cat") == 0) {
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+            fwrite(buf, 1, n, out);
+        }
+        return KC_FLOW_OK;
+    }
+    if (strcmp(argv[0], "mkdir") == 0) {
+        int i;
+        for (i = 1; i < argc; i++) {
+            if (argv[i][0] == '-') continue;
+#ifndef _WIN32
+            mkdir(argv[i], 0777);
+#else
+            CreateDirectoryA(argv[i], NULL);
+#endif
+        }
+        return KC_FLOW_OK;
+    }
+    return 1;
+}
+
+/**
  * Execute one resolved shell command.
  * @param command Shell command.
  * @param flow_path Current flow path.
@@ -1104,7 +1208,8 @@ static int kc_flow_run_command(
     const kc_flow_store_t *flow,
     const kc_flow_store_t *node,
     char **out_data,
-    size_t *out_size
+    size_t *out_size,
+    int ignore_error
 ) {
 #ifndef _WIN32
     FILE *in = tmpfile();
@@ -1116,6 +1221,9 @@ static int kc_flow_run_command(
     size_t total = 0;
     size_t cap = 0;
     char *data = NULL;
+    char **argv = NULL;
+    int argc = 0;
+    int builtin_rc;
 
     if (!in || !out) {
         if (in) {
@@ -1133,38 +1241,57 @@ static int kc_flow_run_command(
     }
     fflush(in);
     rewind(in);
+
+    argv = kc_flow_parse_argv(command, &argc);
+    builtin_rc = kc_flow_run_builtin(argc, argv, in, out);
+    if (builtin_rc != 1) {
+        kc_flow_free_argv(argv);
+        if (builtin_rc != KC_FLOW_OK) {
+            fclose(in);
+            fclose(out);
+            return KC_FLOW_ERROR;
+        }
+        goto capture;
+    }
+
     if (kc_flow_dir(dir, sizeof(dir), flow_path) != KC_FLOW_OK) {
+        kc_flow_free_argv(argv);
         fclose(in);
         fclose(out);
         return KC_FLOW_ERROR;
     }
     pid = fork();
     if (pid < 0) {
+        kc_flow_free_argv(argv);
         fclose(in);
         fclose(out);
         return KC_FLOW_ERROR;
     }
     if (pid == 0) {
-        char file_env[KC_FLOW_MAX_PATH + 16];
-        char dir_env[KC_FLOW_MAX_PATH + 16];
-        snprintf(file_env, sizeof(file_env), "KC_FLOW_FILE=%s", flow_path);
-        snprintf(dir_env, sizeof(dir_env), "KC_FLOW_DIR=%s", dir);
-        putenv(file_env);
-        putenv(dir_env);
+        setenv("KC_FLOW_FILE", flow_path, 1);
+        setenv("KC_FLOW_DIR", dir, 1);
         kc_flow_set_env_store("KC_FLOW_FLOW_PARAM_", flow);
         kc_flow_set_env_store("KC_FLOW_NODE_PARAM_", node);
         kc_flow_set_env_store("KC_FLOW_PARAM_", node);
         dup2(fileno(in), STDIN_FILENO);
         dup2(fileno(out), STDOUT_FILENO);
-        chdir(dir);
-        execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+        if (chdir(dir) != 0) {
+            _exit(1);
+        }
+        if (strpbrk(command, "|&;<>()$`\\\"'*?#~[]") == NULL) {
+            execvp(argv[0], argv);
+        } else {
+            execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+        }
         _exit(127);
     }
-    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    kc_flow_free_argv(argv);
+    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || (WEXITSTATUS(status) != 0 && !ignore_error)) {
         fclose(in);
         fclose(out);
         return KC_FLOW_ERROR;
     }
+capture:
     fflush(out);
     rewind(out);
     while (!feof(out)) {
@@ -1208,34 +1335,80 @@ static int kc_flow_run_command(
     *out_size = total;
     return KC_FLOW_OK;
 #else
-    FILE *pipe;
+    FILE *in = tmpfile();
+    FILE *out = tmpfile();
     char chunk[4096];
     size_t total = 0;
     size_t cap = 0;
     char *data = NULL;
-
+    char **argv = NULL;
+    int argc = 0;
+    int builtin_rc;
     (void)flow_path;
-    (void)input;
-    (void)input_size;
     (void)flow;
     (void)node;
-    pipe = _popen(command, "r");
-    if (!pipe) {
+
+    if (!in || !out) {
+        if (in) fclose(in);
+        if (out) fclose(out);
         return KC_FLOW_ERROR;
     }
-    while (!feof(pipe)) {
-        size_t n = fread(chunk, 1, sizeof(chunk), pipe);
+    if (input_size > 0 && fwrite(input, 1, input_size, in) != input_size) {
+        fclose(in);
+        fclose(out);
+        return KC_FLOW_ERROR;
+    }
+    fflush(in);
+    rewind(in);
+
+    argv = kc_flow_parse_argv(command, &argc);
+    builtin_rc = kc_flow_run_builtin(argc, argv, in, out);
+    if (builtin_rc != 1) {
+        kc_flow_free_argv(argv);
+        if (builtin_rc != KC_FLOW_OK) {
+            fclose(in);
+            fclose(out);
+            return KC_FLOW_ERROR;
+        }
+        goto capture;
+    }
+    kc_flow_free_argv(argv);
+    fclose(in);
+
+    {
+        FILE *pipe = _popen(command, "r");
+        if (!pipe) {
+            fclose(out);
+            return KC_FLOW_ERROR;
+        }
+        while (!feof(pipe)) {
+            size_t n = fread(chunk, 1, sizeof(chunk), pipe);
+            if (n > 0) {
+                fwrite(chunk, 1, n, out);
+            }
+        }
+        {
+            int st = _pclose(pipe);
+            if (st != 0 && !ignore_error) {
+                fclose(out);
+                return KC_FLOW_ERROR;
+            }
+        }
+    }
+capture:
+    fflush(out);
+    rewind(out);
+    while (!feof(out)) {
+        size_t n = fread(chunk, 1, sizeof(chunk), out);
         if (n > 0) {
-            char *next;
             if (total + n + 1 > cap) {
+                char *next;
                 cap = cap ? cap * 2 : 4096;
-                while (cap < total + n + 1) {
-                    cap *= 2;
-                }
+                while (cap < total + n + 1) cap *= 2;
                 next = (char *)realloc(data, cap);
                 if (!next) {
                     free(data);
-                    _pclose(pipe);
+                    fclose(out);
                     return KC_FLOW_ERROR;
                 }
                 data = next;
@@ -1244,15 +1417,10 @@ static int kc_flow_run_command(
             total += n;
         }
     }
-    if (_pclose(pipe) != 0) {
-        free(data);
-        return KC_FLOW_ERROR;
-    }
+    fclose(out);
     if (!data) {
         data = kc_flow_dup("");
-        if (!data) {
-            return KC_FLOW_ERROR;
-        }
+        if (!data) return KC_FLOW_ERROR;
     }
     data[total] = '\0';
     *out_data = data;
@@ -1268,7 +1436,8 @@ static int kc_flow_run_node(
     const kc_flow_store_t *flow_params,
     const kc_flow_node_t *node,
     const kc_flow_branch_t *input,
-    kc_flow_branches_t *outputs
+    kc_flow_branches_t *outputs,
+    int depth
 );
 
 /**
@@ -1285,7 +1454,8 @@ static int kc_flow_run_child(
     const char *path,
     const kc_flow_store_t *overrides,
     const kc_flow_branch_t *input,
-    kc_flow_branches_t *outputs
+    kc_flow_branches_t *outputs,
+    int depth
 ) {
     kc_flow_store_t records;
     kc_flow_model_t *model;
@@ -1325,7 +1495,7 @@ static int kc_flow_run_child(
     }
     for (i = 0; rc == KC_FLOW_OK && i < model->entries.count; ++i) {
         kc_flow_node_t *entry = kc_flow_model_find(model, model->entries.items[i]);
-        if (!entry || kc_flow_run_node(ctx, path, model, &params, entry, input, outputs) != KC_FLOW_OK) {
+        if (!entry || kc_flow_run_node(ctx, path, model, &params, entry, input, outputs, depth + 1) != KC_FLOW_OK) {
             rc = kc_flow_fail(ctx, "child flow execution failed");
         }
     }
@@ -1353,12 +1523,17 @@ static int kc_flow_run_node(
     const kc_flow_store_t *flow_params,
     const kc_flow_node_t *node,
     const kc_flow_branch_t *input,
-    kc_flow_branches_t *outputs
+    kc_flow_branches_t *outputs,
+    int depth
 ) {
     kc_flow_store_t node_params;
     kc_flow_branches_t active;
     size_t i;
     int rc = KC_FLOW_OK;
+
+    if (depth > 64) {
+        return kc_flow_fail(ctx, "maximum flow depth exceeded");
+    }
 
     if (kc_flow_collect_node(flow_params, node, &node_params) != KC_FLOW_OK) {
         return kc_flow_fail(ctx, "unable to resolve node parameters");
@@ -1381,7 +1556,7 @@ static int kc_flow_run_node(
         }
         free(file);
         for (i = 0; rc == KC_FLOW_OK && i < active.count; ++i) {
-            rc = kc_flow_run_child(ctx, child_path, &node_params, &active.items[i], &next);
+            rc = kc_flow_run_child(ctx, child_path, &node_params, &active.items[i], &next, depth + 1);
         }
         kc_flow_branches_free(&active);
         active = next;
@@ -1393,7 +1568,9 @@ static int kc_flow_run_node(
             char *command = kc_flow_template(node->exec, flow_params, &node_params);
             char *out = NULL;
             size_t out_size = 0;
-            if (!command || kc_flow_run_command(command, flow_path, active.items[i].data, active.items[i].size, flow_params, &node_params, &out, &out_size) != KC_FLOW_OK) {
+            const char *ignore = kc_flow_store_get(&node->meta, "ignore_error");
+            int ignore_val = (ignore && strcmp(ignore, "1") == 0);
+            if (!command || kc_flow_run_command(command, flow_path, active.items[i].data, active.items[i].size, flow_params, &node_params, &out, &out_size, ignore_val) != KC_FLOW_OK) {
                 free(command);
                 rc = kc_flow_fail(ctx, "node command failed");
                 break;
@@ -1414,7 +1591,7 @@ static int kc_flow_run_node(
                 if (!next) {
                     rc = kc_flow_fail(ctx, "unknown node link");
                 } else {
-                    rc = kc_flow_run_node(ctx, flow_path, model, flow_params, next, &active.items[i], outputs);
+                    rc = kc_flow_run_node(ctx, flow_path, model, flow_params, next, &active.items[i], outputs, depth + 1);
                 }
             }
         }
@@ -1515,11 +1692,11 @@ static int kc_flow_exec_loaded(
     start.size = input_size;
     if (entry) {
         kc_flow_node_t *node = kc_flow_model_find(model, entry);
-        rc = node ? kc_flow_run_node(ctx, path, model, &params, node, &start, &outputs) : kc_flow_fail(ctx, "unknown entry");
+        rc = node ? kc_flow_run_node(ctx, path, model, &params, node, &start, &outputs, 0) : kc_flow_fail(ctx, "unknown entry");
     } else {
         for (i = 0; rc == KC_FLOW_OK && i < model->entries.count; ++i) {
             kc_flow_node_t *node = kc_flow_model_find(model, model->entries.items[i]);
-            rc = node ? kc_flow_run_node(ctx, path, model, &params, node, &start, &outputs) : kc_flow_fail(ctx, "unknown entry");
+            rc = node ? kc_flow_run_node(ctx, path, model, &params, node, &start, &outputs, 0) : kc_flow_fail(ctx, "unknown entry");
         }
     }
     for (i = 0; rc == KC_FLOW_OK && i < outputs.count; ++i) {
