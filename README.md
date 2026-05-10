@@ -1,8 +1,8 @@
 # flow.c - Branch Flow Runtime
 
-`flow.c` is a kclib package for executing flat `key=value` flow documents as
-independent runtime branches. It provides the `flow` CLI and the embeddable
-`kc_flow_*` C API through `src/flow.h`.
+`flow.c` is a small workflow runner for chaining shell commands and reusable
+child flows. It starts at the flow entries, passes stdin through each branch,
+and writes the final branch output to stdout.
 
 The model is branch-oriented: a flow declares entry nodes, nodes can execute
 commands, expand child flows, and fan out through links. Branches stay
@@ -13,10 +13,10 @@ not a contract or port runtime.
 
 ## CLI
 
-Flow files use full-line comments, single-line attributes, heredoc attributes,
-optional `flow.id`, optional `flow.link`, `flow.param.*`, `node.*.param.*`,
-`node.*.file`, `node.*.exec`, and repeatable `node.*.link` records. Unknown
-structurally valid `flow.*` and `node.*` keys are preserved as metadata.
+The `flow` command executes one workflow file, accepts optional input from
+standard input, and prints the produced branch output to standard output.
+Runtime overlays can replace entries, parameters, child files, and commands
+without editing the source file.
 
 ### Examples
 
@@ -36,6 +36,34 @@ Pipe input through standard input:
 
 ```bash
 printf "input" | ./bin/x86_64/linux/flow file.flow
+```
+
+Write a minimal flow file:
+
+```flow
+flow.link=upper
+
+node.upper.exec=tr '[:lower:]' '[:upper:]'
+```
+
+Write a flow that passes parameters to a child flow:
+
+```flow
+flow.link=greet
+flow.param.name=World
+
+node.greet.file=child.flow
+node.greet.param.name=<flow.param.name>
+node.greet.link=suffix
+
+node.suffix.exec=cat; printf "%s" "!"
+```
+
+```flow
+flow.link=print
+flow.param.name=Friend
+
+node.print.exec=printf "%s" "Hello <flow.param.name>"
 ```
 
 Overlay one effective flow document:
