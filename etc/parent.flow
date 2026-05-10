@@ -1,0 +1,13 @@
+flow.id=parent
+flow.param.hello=Hello
+flow.link=node-1
+
+node.node-1.file=child.flow
+node.node-1.param.hello=<flow.param.hello>
+node.node-1.link=node-2
+
+node.node-2.exec=cat; printf "%s" "<node.param.hello> Mundo"
+node.node-2.param.hello=Hola
+
+node.node-3.file=child.flow
+node.node-3.param.hello=Bonjour

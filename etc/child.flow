@@ -1,0 +1,6 @@
+flow.id=child
+flow.param.hello=Hello
+flow.param.world=World
+flow.link=node-1
+
+node.node-1.exec=printf "%s" "<flow.param.hello> <flow.param.world>"
