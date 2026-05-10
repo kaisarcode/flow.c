@@ -107,6 +107,13 @@ int kc_flow_exec_entry(
  */
 void kc_flow_free(void *output);
 
+/**
+ * Returns the last error message from a flow context.
+ * @param ctx Context pointer.
+ * @return Static error string.
+ */
+const char *kc_flow_strerror(kc_flow_t *ctx);
+
 #ifdef __cplusplus
 }
 #endif

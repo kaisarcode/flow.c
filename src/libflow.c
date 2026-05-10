@@ -835,6 +835,12 @@ static int kc_flow_relative_path(char *out, size_t out_size, const char *base_fi
         return snprintf(out, out_size, "%s", value) >= (int)out_size ? KC_FLOW_ERROR : KC_FLOW_OK;
     }
     slash = strrchr(base_file, '/');
+#ifdef _WIN32
+    const char *backslash = strrchr(base_file, '\\');
+    if (backslash && (!slash || backslash > slash)) {
+        slash = backslash;
+    }
+#endif
     if (!slash) {
         return snprintf(out, out_size, "%s", value) >= (int)out_size ? KC_FLOW_ERROR : KC_FLOW_OK;
     }
@@ -855,9 +861,14 @@ static int kc_flow_relative_path(char *out, size_t out_size, const char *base_fi
  * @param file File path.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-#ifndef _WIN32
 static int kc_flow_dir(char *out, size_t out_size, const char *file) {
     const char *slash = strrchr(file, '/');
+#ifdef _WIN32
+    const char *backslash = strrchr(file, '\\');
+    if (backslash && (!slash || backslash > slash)) {
+        slash = backslash;
+    }
+#endif
     size_t len;
 
     if (!slash) {
@@ -874,7 +885,6 @@ static int kc_flow_dir(char *out, size_t out_size, const char *file) {
     out[len] = '\0';
     return KC_FLOW_OK;
 }
-#endif
 
 /**
  * Resolve one placeholder value.
@@ -1153,12 +1163,13 @@ static void kc_flow_free_argv(char **argv) {
  * @param argv Argument vector.
  * @param in Input stream.
  * @param out Output stream.
+ * @param dir Working directory.
  * @return KC_FLOW_OK on success, KC_FLOW_ERROR, or 1 if not a builtin.
  */
-static int kc_flow_run_builtin(int argc, char **argv, FILE *in, FILE *out) {
+static int kc_flow_run_builtin(int argc, char **argv, FILE *in, FILE *out, const char *dir) {
+    int i;
     if (argc == 0) return 1;
     if (strcmp(argv[0], "echo") == 0) {
-        int i;
         for (i = 1; i < argc; i++) {
             fprintf(out, "%s%s", argv[i], (i + 1 < argc) ? " " : "");
         }
@@ -1166,21 +1177,50 @@ static int kc_flow_run_builtin(int argc, char **argv, FILE *in, FILE *out) {
         return KC_FLOW_OK;
     }
     if (strcmp(argv[0], "cat") == 0) {
-        char buf[4096];
-        size_t n;
-        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
-            fwrite(buf, 1, n, out);
+        if (argc == 1) {
+            char buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+                fwrite(buf, 1, n, out);
+            }
+            return KC_FLOW_OK;
+        }
+        for (i = 1; i < argc; i++) {
+            char path[KC_FLOW_MAX_PATH * 2];
+            FILE *f;
+            if (argv[i][0] == '-') return 1;
+            if (argv[i][0] == '/' || (argv[i][0] && argv[i][1] == ':')) {
+                snprintf(path, sizeof(path), "%s", argv[i]);
+            } else {
+                snprintf(path, sizeof(path), "%s/%s", dir, argv[i]);
+            }
+            f = fopen(path, "rb");
+            if (!f) return KC_FLOW_ERROR;
+            {
+                char buf[4096];
+                size_t n;
+                while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+                    fwrite(buf, 1, n, out);
+                }
+            }
+            fclose(f);
         }
         return KC_FLOW_OK;
     }
     if (strcmp(argv[0], "mkdir") == 0) {
         int i;
         for (i = 1; i < argc; i++) {
+            char path[KC_FLOW_MAX_PATH * 2];
             if (argv[i][0] == '-') continue;
+            if (argv[i][0] == '/' || (argv[i][0] && argv[i][1] == ':')) {
+                snprintf(path, sizeof(path), "%s", argv[i]);
+            } else {
+                snprintf(path, sizeof(path), "%s/%s", dir, argv[i]);
+            }
 #ifndef _WIN32
-            mkdir(argv[i], 0777);
+            if (mkdir(path, 0777) != 0 && errno != EEXIST) return KC_FLOW_ERROR;
 #else
-            CreateDirectoryA(argv[i], NULL);
+            if (!CreateDirectoryA(path, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) return KC_FLOW_ERROR;
 #endif
         }
         return KC_FLOW_OK;
@@ -1242,24 +1282,26 @@ static int kc_flow_run_command(
     fflush(in);
     rewind(in);
 
-    argv = kc_flow_parse_argv(command, &argc);
-    builtin_rc = kc_flow_run_builtin(argc, argv, in, out);
-    if (builtin_rc != 1) {
-        kc_flow_free_argv(argv);
-        if (builtin_rc != KC_FLOW_OK) {
-            fclose(in);
-            fclose(out);
-            return KC_FLOW_ERROR;
-        }
-        goto capture;
-    }
-
     if (kc_flow_dir(dir, sizeof(dir), flow_path) != KC_FLOW_OK) {
-        kc_flow_free_argv(argv);
         fclose(in);
         fclose(out);
         return KC_FLOW_ERROR;
     }
+
+    if (strpbrk(command, "|&;<>()$`\\\"'*?#~[]") == NULL) {
+        argv = kc_flow_parse_argv(command, &argc);
+        builtin_rc = kc_flow_run_builtin(argc, argv, in, out, dir);
+        if (builtin_rc != 1) {
+            kc_flow_free_argv(argv);
+            if (builtin_rc != KC_FLOW_OK) {
+                fclose(in);
+                fclose(out);
+                return KC_FLOW_ERROR;
+            }
+            goto capture;
+        }
+    }
+
     pid = fork();
     if (pid < 0) {
         kc_flow_free_argv(argv);
@@ -1278,7 +1320,7 @@ static int kc_flow_run_command(
         if (chdir(dir) != 0) {
             _exit(1);
         }
-        if (strpbrk(command, "|&;<>()$`\\\"'*?#~[]") == NULL) {
+        if (argv) {
             execvp(argv[0], argv);
         } else {
             execl("/bin/sh", "sh", "-c", command, (char *)NULL);
@@ -1344,7 +1386,7 @@ capture:
     char **argv = NULL;
     int argc = 0;
     int builtin_rc;
-    (void)flow_path;
+    char dir[KC_FLOW_MAX_PATH];
     (void)flow;
     (void)node;
 
@@ -1361,16 +1403,24 @@ capture:
     fflush(in);
     rewind(in);
 
-    argv = kc_flow_parse_argv(command, &argc);
-    builtin_rc = kc_flow_run_builtin(argc, argv, in, out);
-    if (builtin_rc != 1) {
-        kc_flow_free_argv(argv);
-        if (builtin_rc != KC_FLOW_OK) {
-            fclose(in);
-            fclose(out);
-            return KC_FLOW_ERROR;
+    if (kc_flow_dir(dir, sizeof(dir), flow_path) != KC_FLOW_OK) {
+        fclose(in);
+        fclose(out);
+        return KC_FLOW_ERROR;
+    }
+
+    if (strpbrk(command, "|&;<>()$`\\\"'*?#~[]") == NULL) {
+        argv = kc_flow_parse_argv(command, &argc);
+        builtin_rc = kc_flow_run_builtin(argc, argv, in, out, dir);
+        if (builtin_rc != 1) {
+            kc_flow_free_argv(argv);
+            if (builtin_rc != KC_FLOW_OK) {
+                fclose(in);
+                fclose(out);
+                return KC_FLOW_ERROR;
+            }
+            goto capture;
         }
-        goto capture;
     }
     kc_flow_free_argv(argv);
     fclose(in);
@@ -1871,4 +1921,16 @@ int kc_flow_exec_entry(
  */
 void kc_flow_free(void *output) {
     free(output);
+}
+
+/**
+ * Returns the last error message from a flow context.
+ * @param ctx Context pointer.
+ * @return Static error string.
+ */
+const char *kc_flow_strerror(kc_flow_t *ctx) {
+    if (!ctx || !ctx->error[0]) {
+        return "unknown error";
+    }
+    return ctx->error;
 }

@@ -259,8 +259,9 @@ int main(int argc, char **argv) {
     rc = entry ? kc_flow_exec_entry(ctx, run_path, entry, input, input_size, &output, &output_size) : kc_flow_exec(ctx, run_path, input, input_size, &output, &output_size);
     free(input);
     if (rc != KC_FLOW_OK) {
+        fprintf(stderr, "flow: %s\n", kc_flow_strerror(ctx));
         kc_flow_close(ctx);
-        return kc_flow_cli_fail("execution failed");
+        return 1;
     }
     if (output_size > 0 && fwrite(output, 1, output_size, stdout) != output_size) {
         kc_flow_free(output);
