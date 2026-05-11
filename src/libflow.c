@@ -471,9 +471,17 @@ static int kc_flow_read_heredoc(FILE *fp, const char *marker, char **out_value) 
     size_t value_cap = 0;
 
     while (kc_flow_read_line(fp, &line, &cap)) {
-        char *check = kc_flow_trim(line);
-        size_t len;
+        size_t len = strlen(line);
+        char *check;
+        char *tmp = kc_flow_dup(line);
+        if (!tmp) {
+            free(line);
+            free(value);
+            return KC_FLOW_ERROR;
+        }
+        check = kc_flow_trim(tmp);
         if (strcmp(check, marker) == 0) {
+            free(tmp);
             free(line);
             if (!value) {
                 value = kc_flow_dup("");
@@ -481,7 +489,7 @@ static int kc_flow_read_heredoc(FILE *fp, const char *marker, char **out_value) 
             *out_value = value;
             return value ? KC_FLOW_OK : KC_FLOW_ERROR;
         }
-        len = strlen(line);
+        free(tmp);
         if (size + len + 1 > value_cap) {
             char *next;
             value_cap = value_cap ? value_cap * 2 : 256;
