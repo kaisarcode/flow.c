@@ -1,4 +1,10 @@
 flow.link=root
-func.test.exec=printf "FUNC <arg.msg>"
-node.root.exec=<func.test root.data>
-node.root.data.msg=Hello
+
+func.hello.exec=Hello <arg.name>
+
+# Call func inside a data key
+node.data.name=World
+node.data.msg=<func.hello data>
+
+# Use that resolved data key in exec
+node.root.exec=printf "Message: <node.data.msg>"

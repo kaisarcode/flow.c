@@ -69,37 +69,49 @@ node.print.exec=printf "%s" "Hello <flow.name>"
 Write a flow using `node.use` for behavior inheritance:
 
 ```flow
-flow.link=robots
+flow.link=backup
 
-node.build.status=200
-node.build.exec=<<EOF
-cat "<node.source>" | http build response --status <node.status>
+node.worker.label=BACKUP
+node.worker.exec=<<EOF
+printf "[<node.label>] Processing: <node.file>\n"
+cat "<node.file>" | gzip > "<node.file>.gz"
 EOF
 
-node.robots.use=build
-node.robots.source=robots.txt
+node.backup.use=worker
+node.backup.file=data.txt
 ```
 
 Write a flow using `func` for reusable templates:
 
 ```flow
-flow.link=router
+flow.link=main
 
-func.static.exec=<<EOF
-[ "$REQUEST_PATH" = "<arg.path>" ] && {
-  cat "<arg.source>" | http build response --status 200
-  exit 0
-}
+func.log.exec=<<EOF
+printf "[%s] <arg.level>: <arg.msg>\n" "$(date +%T)"
 EOF
 
-node.route.robots.path=/robots.txt
-node.route.robots.source=robots.txt
-
-node.router.exec=<<EOF
-REQUEST_PATH="${REQUEST_PATH:-/}"
-<func.static route.robots>
-printf "Not found" | http build response --status 404
+node.main.exec=<<EOF
+<func.log info.startup>
+# ... perform work ...
+<func.log info.shutdown>
 EOF
+
+node.info.startup.level=INFO
+node.info.startup.msg=System starting up
+
+node.info.shutdown.level=INFO
+node.info.shutdown.msg=System shutting down
+```
+
+Functions can be called anywhere a template tag is supported, including inside other data keys:
+
+```flow
+func.greet.exec=Hello <arg.name>
+
+node.data.name=World
+node.data.msg=<func.greet data>
+
+node.main.exec=printf "Message: <node.data.msg>"
 ```
 
 Overlay one effective flow document:
@@ -108,7 +120,7 @@ Overlay one effective flow document:
 ./bin/x86_64/linux/flow file.flow \
     --unset flow.link \
     --set flow.link=server \
-    --set node.server.exec='printf "%s" "<flow.param.message>"'
+    --set node.server.exec='printf "%s" "<flow.message>"'
 ```
 
 Run the included parent and child examples:
