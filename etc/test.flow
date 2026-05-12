@@ -1,5 +1,0 @@
-flow.link=root
-flow.msg=Global
-
-node.root.msg=Local
-node.root.exec=printf "Local: <node.msg>, Global: <flow.msg>, Bare: <msg>"

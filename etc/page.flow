@@ -1,0 +1,28 @@
+flow.id=page-renderer
+flow.site=Tiny Flow Site
+flow.heading=Untitled
+flow.body=Empty page
+flow.slug=page
+flow.status=200 OK
+flow.link=render
+
+func.title.exec=<<EOF
+printf "%s / %s" "<arg.site>" "<arg.heading>"
+EOF
+
+node.meta.site=<flow.site>
+node.meta.heading=<flow.heading>
+
+node.render.title=<func.title meta>
+node.render.exec=<<EOF
+body=$(cat)
+printf "# %s\n" "<node.title>"
+printf "status: %s\n" "<flow.status>"
+printf "slug: %s\n" "<flow.slug>"
+printf "\n"
+if [ -n "$body" ]; then
+    printf "%s\n" "$body"
+else
+    printf "%s\n" "<flow.body>"
+fi
+EOF

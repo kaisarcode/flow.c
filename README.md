@@ -23,7 +23,7 @@ without editing the source file.
 Execute one flow file:
 
 ```bash
-./bin/x86_64/linux/flow etc/parent.flow
+./bin/x86_64/linux/flow etc/site.flow
 ```
 
 Execute one explicit entry:
@@ -46,24 +46,48 @@ flow.link=upper
 node.upper.exec=tr '[:lower:]' '[:upper:]'
 ```
 
-Write a flow that passes parameters to a child flow:
+The included `etc` directory is a small static-site request pipeline:
 
-```flow
-flow.link=greet
-flow.name=World
-
-node.greet.file=child.flow
-node.greet.name=<flow.name>
-node.greet.link=suffix
-
-node.suffix.exec=cat; printf "%s" "!"
+```bash
+./bin/x86_64/linux/flow etc/site.flow
+./bin/x86_64/linux/flow etc/site.flow --set flow.path=/
+./bin/x86_64/linux/flow etc/site.flow --set flow.path=/missing
+printf "Hello" | ./bin/x86_64/linux/flow etc/page.flow
 ```
 
-```flow
-flow.link=print
-flow.name=Friend
+`site.flow` routes a request path, renders a page through `page.flow`, then
+fans the rendered page out to emit the page, count words, and compute a
+checksum. It uses only default Linux commands such as `printf`, `cat`, `wc`,
+`cksum`, `cut`, and shell `case`.
 
-node.print.exec=printf "%s" "Hello <flow.name>"
+Its main route is an executable heredoc `node.link`:
+
+```flow
+flow.id=tiny-site
+flow.path=/robots.txt
+flow.link=request
+
+node.request.link=<<EOF
+case "<flow.path>" in
+    "/") printf home ;;
+    "/robots.txt") printf robots ;;
+    *) printf missing ;;
+esac
+EOF
+```
+
+Each route uses a shared child-flow behavior:
+
+```flow
+node.page.file=page.flow
+node.page.site=<flow.site>
+
+node.home.use=page
+node.home.slug=home
+node.home.heading=Home
+node.home.body=Welcome to the tiny flow site.
+node.home.status=<func.status home.status>
+node.home.link=audit
 ```
 
 Write a flow using `node.use` for behavior inheritance:
@@ -87,13 +111,13 @@ Write a flow using `func` for reusable templates:
 flow.link=main
 
 func.log.exec=<<EOF
-printf "[%s] <arg.level>: <arg.msg>\n" "$(date +%T)"
+printf "[%s] %s: %s" "$(date +%T)" "<arg.level>" "<arg.msg>"
 EOF
 
 node.main.exec=<<EOF
-<func.log info.startup>
-# ... perform work ...
-<func.log info.shutdown>
+printf "%s\n" "<func.log info.startup>"
+printf "%s\n" "work complete"
+printf "%s\n" "<func.log info.shutdown>"
 EOF
 
 node.info.startup.level=INFO
@@ -106,13 +130,43 @@ node.info.shutdown.msg=System shutting down
 Functions can be called anywhere a template tag is supported, including inside other data keys:
 
 ```flow
-func.greet.exec=Hello <arg.name>
+func.greet.exec=<<EOF
+printf "Hello %s" "<arg.name>"
+EOF
 
 node.data.name=World
 node.data.msg=<func.greet data>
 
 node.main.exec=printf "Message: <node.data.msg>"
 ```
+
+Heredoc values are executable values:
+
+```flow
+flow.link=router
+flow.env=dev
+
+node.server.port=<<EOF
+[ "<flow.env>" = "dev" ] && printf 8080 || printf 80
+EOF
+
+node.router.link=<<EOF
+printf home
+EOF
+
+node.home.exec=printf "port=%s" "<node.server.port>"
+```
+
+A heredoc can be used on any `flow.*`, `node.*`, or `func.*` key. The heredoc
+body is template-expanded and executed when the field is resolved. Its stdout
+becomes the resolved value, with exactly one trailing newline removed when one
+is present.
+
+The key determines how the computed value is used:
+
+- `node.exec` runs as the node action, and stdout becomes node output.
+- `node.link` computes the downstream node name.
+- Other fields compute the final parameter value.
 
 Overlay one effective flow document:
 
@@ -123,11 +177,13 @@ Overlay one effective flow document:
     --set node.server.exec='printf "%s" "<flow.message>"'
 ```
 
-Run the included parent and child examples:
+Run the included cohesive examples:
 
 ```bash
-./bin/x86_64/linux/flow etc/parent.flow
-./bin/x86_64/linux/flow etc/child.flow
+./bin/x86_64/linux/flow etc/site.flow
+./bin/x86_64/linux/flow etc/site.flow --set flow.path=/
+./bin/x86_64/linux/flow etc/site.flow --set flow.path=/missing
+./bin/x86_64/linux/flow etc/page.flow --set flow.heading=Preview
 ```
 
 ---
@@ -156,7 +212,7 @@ char *output = NULL;
 size_t output_size = 0;
 
 kc_flow_set(ctx, "flow.hello", "Hello");
-kc_flow_exec(ctx, "etc/parent.flow", NULL, 0, &output, &output_size);
+kc_flow_exec(ctx, "etc/page.flow", NULL, 0, &output, &output_size);
 
 kc_flow_free(output);
 kc_flow_close(ctx);

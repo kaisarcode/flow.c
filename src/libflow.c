@@ -40,9 +40,15 @@ typedef enum kc_flow_overlay_kind {
     KC_FLOW_OVERLAY_UNSET = 2
 } kc_flow_overlay_kind_t;
 
+typedef enum kc_flow_value_kind {
+    KC_FLOW_VALUE_LITERAL = 1,
+    KC_FLOW_VALUE_EXEC = 2
+} kc_flow_value_kind_t;
+
 typedef struct kc_flow_record {
     char *key;
     char *value;
+    kc_flow_value_kind_t kind;
 } kc_flow_record_t;
 
 typedef struct kc_flow_store {
@@ -51,7 +57,7 @@ typedef struct kc_flow_store {
 } kc_flow_store_t;
 
 typedef struct kc_flow_links {
-    char *items[KC_FLOW_MAX_RECORDS];
+    kc_flow_record_t items[KC_FLOW_MAX_RECORDS];
     size_t count;
 } kc_flow_links_t;
 
@@ -59,7 +65,9 @@ typedef struct kc_flow_node {
     char *ref;
     char *use;
     char *file;
+    kc_flow_value_kind_t file_kind;
     char *exec;
+    kc_flow_value_kind_t exec_kind;
     kc_flow_store_t data;
     kc_flow_links_t links;
 } kc_flow_node_t;
@@ -176,20 +184,35 @@ static void kc_flow_store_free(kc_flow_store_t *store) {
 }
 
 /**
+ * Resolve one record from a store.
+ * @param store Store pointer.
+ * @param key Lookup key.
+ * @return Stored record or NULL.
+ */
+static const kc_flow_record_t *kc_flow_store_get_record(
+    const kc_flow_store_t *store,
+    const char *key
+) {
+    size_t i;
+
+    for (i = 0; i < store->count; ++i) {
+        if (strcmp(store->items[i].key, key) == 0) {
+            return &store->items[i];
+        }
+    }
+    return NULL;
+}
+
+/**
  * Resolve one key from a store.
  * @param store Store pointer.
  * @param key Lookup key.
  * @return Stored value or NULL.
  */
 static const char *kc_flow_store_get(const kc_flow_store_t *store, const char *key) {
-    size_t i;
+    const kc_flow_record_t *record = kc_flow_store_get_record(store, key);
 
-    for (i = 0; i < store->count; ++i) {
-        if (strcmp(store->items[i].key, key) == 0) {
-            return store->items[i].value;
-        }
-    }
-    return NULL;
+    return record ? record->value : NULL;
 }
 
 /**
@@ -197,9 +220,15 @@ static const char *kc_flow_store_get(const kc_flow_store_t *store, const char *k
  * @param store Store pointer.
  * @param key Record key.
  * @param value Record value.
+ * @param kind Value kind.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-static int kc_flow_store_set(kc_flow_store_t *store, const char *key, const char *value) {
+static int kc_flow_store_set_kind(
+    kc_flow_store_t *store,
+    const char *key,
+    const char *value,
+    kc_flow_value_kind_t kind
+) {
     size_t i;
 
     for (i = 0; i < store->count; ++i) {
@@ -210,6 +239,7 @@ static int kc_flow_store_set(kc_flow_store_t *store, const char *key, const char
             }
             free(store->items[i].value);
             store->items[i].value = next;
+            store->items[i].kind = kind;
             return KC_FLOW_OK;
         }
     }
@@ -218,6 +248,7 @@ static int kc_flow_store_set(kc_flow_store_t *store, const char *key, const char
     }
     store->items[store->count].key = kc_flow_dup(key);
     store->items[store->count].value = kc_flow_dup(value);
+    store->items[store->count].kind = kind;
     if (!store->items[store->count].key || !store->items[store->count].value) {
         free(store->items[store->count].key);
         free(store->items[store->count].value);
@@ -225,6 +256,21 @@ static int kc_flow_store_set(kc_flow_store_t *store, const char *key, const char
     }
     store->count++;
     return KC_FLOW_OK;
+}
+
+/**
+ * Add or replace one literal store value.
+ * @param store Store pointer.
+ * @param key Record key.
+ * @param value Record value.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
+ */
+static int kc_flow_store_set(
+    kc_flow_store_t *store,
+    const char *key,
+    const char *value
+) {
+    return kc_flow_store_set_kind(store, key, value, KC_FLOW_VALUE_LITERAL);
 }
 
 /**
@@ -238,7 +284,12 @@ static int kc_flow_store_copy(kc_flow_store_t *dst, const kc_flow_store_t *src) 
 
     kc_flow_store_init(dst);
     for (i = 0; i < src->count; ++i) {
-        if (kc_flow_store_set(dst, src->items[i].key, src->items[i].value) != KC_FLOW_OK) {
+        if (kc_flow_store_set_kind(
+            dst,
+            src->items[i].key,
+            src->items[i].value,
+            src->items[i].kind
+        ) != KC_FLOW_OK) {
             kc_flow_store_free(dst);
             return KC_FLOW_ERROR;
         }
@@ -264,7 +315,8 @@ static void kc_flow_links_free(kc_flow_links_t *links) {
     size_t i;
 
     for (i = 0; i < links->count; ++i) {
-        free(links->items[i]);
+        free(links->items[i].key);
+        free(links->items[i].value);
     }
     kc_flow_links_init(links);
 }
@@ -273,14 +325,23 @@ static void kc_flow_links_free(kc_flow_links_t *links) {
  * Append one link value.
  * @param links Link list pointer.
  * @param value Link value.
+ * @param kind Value kind.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-static int kc_flow_links_add(kc_flow_links_t *links, const char *value) {
+static int kc_flow_links_add(
+    kc_flow_links_t *links,
+    const char *value,
+    kc_flow_value_kind_t kind
+) {
     if (links->count >= KC_FLOW_MAX_RECORDS) {
         return KC_FLOW_ERROR;
     }
-    links->items[links->count] = kc_flow_dup(value);
-    if (!links->items[links->count]) {
+    links->items[links->count].key = kc_flow_dup("link");
+    links->items[links->count].value = kc_flow_dup(value);
+    links->items[links->count].kind = kind;
+    if (!links->items[links->count].key || !links->items[links->count].value) {
+        free(links->items[links->count].key);
+        free(links->items[links->count].value);
         return KC_FLOW_ERROR;
     }
     links->count++;
@@ -420,14 +481,21 @@ static int kc_flow_key_valid(const char *key) {
  * @param records Document records.
  * @param key Record key.
  * @param value Record value.
+ * @param kind Value kind.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-static int kc_flow_records_add(kc_flow_store_t *records, const char *key, const char *value) {
+static int kc_flow_records_add(
+    kc_flow_store_t *records,
+    const char *key,
+    const char *value,
+    kc_flow_value_kind_t kind
+) {
     if (records->count >= KC_FLOW_MAX_RECORDS || !kc_flow_key_valid(key)) {
         return KC_FLOW_ERROR;
     }
     records->items[records->count].key = kc_flow_dup(key);
     records->items[records->count].value = kc_flow_dup(value);
+    records->items[records->count].kind = kind;
     if (!records->items[records->count].key || !records->items[records->count].value) {
         free(records->items[records->count].key);
         free(records->items[records->count].value);
@@ -540,6 +608,7 @@ static int kc_flow_read_records(const char *path, kc_flow_store_t *records) {
         char *eq;
         char *value;
         char *owned = NULL;
+        kc_flow_value_kind_t kind = KC_FLOW_VALUE_LITERAL;
         if (!*key || *key == '#') {
             continue;
         }
@@ -561,8 +630,9 @@ static int kc_flow_read_records(const char *path, kc_flow_store_t *records) {
                 return KC_FLOW_ERROR;
             }
             value = owned;
+            kind = KC_FLOW_VALUE_EXEC;
         }
-        if (kc_flow_records_add(records, key, value) != KC_FLOW_OK) {
+        if (kc_flow_records_add(records, key, value, kind) != KC_FLOW_OK) {
             free(owned);
             free(line);
             fclose(fp);
@@ -591,7 +661,12 @@ static int kc_flow_apply_overlays(kc_flow_t *ctx, kc_flow_store_t *records) {
         }
         if (ctx->overlays[i].kind == KC_FLOW_OVERLAY_UNSET) {
             kc_flow_records_remove(records, ctx->overlays[i].key);
-        } else if (kc_flow_records_add(records, ctx->overlays[i].key, ctx->overlays[i].value) != KC_FLOW_OK) {
+        } else if (kc_flow_records_add(
+            records,
+            ctx->overlays[i].key,
+            ctx->overlays[i].value,
+            KC_FLOW_VALUE_LITERAL
+        ) != KC_FLOW_OK) {
             return kc_flow_fail(ctx, "unable to apply overlay");
         }
     }
@@ -751,9 +826,15 @@ static kc_flow_node_t *kc_flow_model_func(kc_flow_model_t *model, const char *re
  * @param model Model pointer.
  * @param key Record key.
  * @param value Record value.
+ * @param kind Value kind.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-static int kc_flow_parse_node(kc_flow_model_t *model, const char *key, const char *value) {
+static int kc_flow_parse_node(
+    kc_flow_model_t *model,
+    const char *key,
+    const char *value,
+    kc_flow_value_kind_t kind
+) {
     const char *ref_start = key + 5;
     const char *field = strchr(ref_start, '.');
     char ref[KC_FLOW_MAX_KEY];
@@ -790,6 +871,7 @@ static int kc_flow_parse_node(kc_flow_model_t *model, const char *key, const cha
         }
         free(node->file);
         node->file = next;
+        node->file_kind = kind;
         return KC_FLOW_OK;
     }
     if (strcmp(field, "exec") == 0) {
@@ -799,12 +881,13 @@ static int kc_flow_parse_node(kc_flow_model_t *model, const char *key, const cha
         }
         free(node->exec);
         node->exec = next;
+        node->exec_kind = kind;
         return KC_FLOW_OK;
     }
     if (strcmp(field, "link") == 0) {
-        return kc_flow_links_add(&node->links, value);
+        return kc_flow_links_add(&node->links, value, kind);
     }
-    return kc_flow_store_set(&node->data, field, value);
+    return kc_flow_store_set_kind(&node->data, field, value, kind);
 }
 
 /**
@@ -812,9 +895,15 @@ static int kc_flow_parse_node(kc_flow_model_t *model, const char *key, const cha
  * @param model Model pointer.
  * @param key Record key.
  * @param value Record value.
+ * @param kind Value kind.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-static int kc_flow_parse_func(kc_flow_model_t *model, const char *key, const char *value) {
+static int kc_flow_parse_func(
+    kc_flow_model_t *model,
+    const char *key,
+    const char *value,
+    kc_flow_value_kind_t kind
+) {
     const char *ref_start = key + 5;
     const char *field = strchr(ref_start, '.');
     char ref[KC_FLOW_MAX_KEY];
@@ -851,6 +940,7 @@ static int kc_flow_parse_func(kc_flow_model_t *model, const char *key, const cha
         }
         free(func->file);
         func->file = next;
+        func->file_kind = kind;
         return KC_FLOW_OK;
     }
     if (strcmp(field, "exec") == 0) {
@@ -860,9 +950,10 @@ static int kc_flow_parse_func(kc_flow_model_t *model, const char *key, const cha
         }
         free(func->exec);
         func->exec = next;
+        func->exec_kind = kind;
         return KC_FLOW_OK;
     }
-    return kc_flow_store_set(&func->data, field, value);
+    return kc_flow_store_set_kind(&func->data, field, value, kind);
 }
 
 /**
@@ -878,6 +969,7 @@ static int kc_flow_parse_model(const kc_flow_store_t *records, kc_flow_model_t *
     for (i = 0; i < records->count; ++i) {
         const char *key = records->items[i].key;
         const char *value = records->items[i].value;
+        kc_flow_value_kind_t kind = records->items[i].kind;
         if (strcmp(key, "flow.id") == 0) {
             char *next = kc_flow_dup(value);
             if (!next) {
@@ -886,19 +978,19 @@ static int kc_flow_parse_model(const kc_flow_store_t *records, kc_flow_model_t *
             free(model->id);
             model->id = next;
         } else if (strcmp(key, "flow.link") == 0) {
-            if (kc_flow_links_add(&model->entries, value) != KC_FLOW_OK) {
+            if (kc_flow_links_add(&model->entries, value, kind) != KC_FLOW_OK) {
                 return KC_FLOW_ERROR;
             }
         } else if (strncmp(key, "node.", 5) == 0) {
-            if (kc_flow_parse_node(model, key, value) != KC_FLOW_OK) {
+            if (kc_flow_parse_node(model, key, value, kind) != KC_FLOW_OK) {
                 return KC_FLOW_ERROR;
             }
         } else if (strncmp(key, "func.", 5) == 0) {
-            if (kc_flow_parse_func(model, key, value) != KC_FLOW_OK) {
+            if (kc_flow_parse_func(model, key, value, kind) != KC_FLOW_OK) {
                 return KC_FLOW_ERROR;
             }
         } else if (strncmp(key, "flow.", 5) == 0) {
-            if (kc_flow_store_set(&model->data, key + 5, value) != KC_FLOW_OK) {
+            if (kc_flow_store_set_kind(&model->data, key + 5, value, kind) != KC_FLOW_OK) {
                 return KC_FLOW_ERROR;
             }
         } else {
@@ -932,7 +1024,11 @@ static int kc_flow_validate_walk(kc_flow_model_t *model, kc_flow_node_t *node, u
         return KC_FLOW_ERROR;
     }
     for (i = 0; i < node->links.count; ++i) {
-        kc_flow_node_t *child = kc_flow_model_find(model, node->links.items[i]);
+        kc_flow_node_t *child;
+        if (node->links.items[i].kind == KC_FLOW_VALUE_EXEC) {
+            continue;
+        }
+        child = kc_flow_model_find(model, node->links.items[i].value);
         if (!child || kc_flow_validate_walk(model, child, seen, stack) != KC_FLOW_OK) {
             return KC_FLOW_ERROR;
         }
@@ -959,7 +1055,11 @@ static int kc_flow_validate_model(kc_flow_model_t *model, const char *entry) {
         return node ? kc_flow_validate_walk(model, node, seen, stack) : KC_FLOW_ERROR;
     }
     for (i = 0; i < model->entries.count; ++i) {
-        kc_flow_node_t *node = kc_flow_model_find(model, model->entries.items[i]);
+        kc_flow_node_t *node;
+        if (model->entries.items[i].kind == KC_FLOW_VALUE_EXEC) {
+            continue;
+        }
+        node = kc_flow_model_find(model, model->entries.items[i].value);
         if (!node || kc_flow_validate_walk(model, node, seen, stack) != KC_FLOW_OK) {
             return KC_FLOW_ERROR;
         }
@@ -1069,23 +1169,149 @@ static int kc_flow_append_text(char **out, size_t *cap, size_t *len, const char 
     return KC_FLOW_OK;
 }
 
+static int kc_flow_run_command(
+    const char *command,
+    const char *flow_path,
+    const void *input,
+    size_t input_size,
+    kc_flow_model_t *model,
+    const kc_flow_store_t *flow,
+    const kc_flow_node_t *current_node,
+    const kc_flow_store_t *node,
+    char **out_data,
+    size_t *out_size,
+    int ignore_error
+);
+
 static char *kc_flow_template(
+    kc_flow_t *ctx,
+    const char *flow_path,
     const char *text,
     kc_flow_model_t *model,
     const kc_flow_store_t *flow,
     const kc_flow_node_t *node,
     const kc_flow_store_t *node_data,
+    kc_flow_store_t *cache,
     int depth
 );
 
 static int kc_flow_collect_node_from(
+    kc_flow_t *ctx,
+    const char *flow_path,
     kc_flow_model_t *model,
     const kc_flow_store_t *flow,
     const kc_flow_node_t *current,
     const kc_flow_node_t *source,
     kc_flow_store_t *out,
+    kc_flow_store_t *cache,
     int depth
 );
+
+/**
+ * Remove exactly one trailing newline from one owned buffer.
+ * @param value Mutable value.
+ * @param size Value size pointer.
+ * @return None.
+ */
+static void kc_flow_chomp_one(char *value, size_t *size) {
+    if (*size > 0 && value[*size - 1] == '\n') {
+        (*size)--;
+        value[*size] = '\0';
+    }
+}
+
+/**
+ * Resolve one value record in the current execution scope.
+ * @param ctx Context pointer.
+ * @param flow_path Current flow path.
+ * @param model Parsed model.
+ * @param flow Effective flow data.
+ * @param current Current node.
+ * @param node_data Current node data.
+ * @param cache Per-node value cache.
+ * @param cache_key Cache key.
+ * @param record Source value record.
+ * @param depth Recursion guard.
+ * @return Owned resolved value or NULL.
+ */
+static char *kc_flow_resolve_record(
+    kc_flow_t *ctx,
+    const char *flow_path,
+    kc_flow_model_t *model,
+    const kc_flow_store_t *flow,
+    const kc_flow_node_t *current,
+    const kc_flow_store_t *node_data,
+    kc_flow_store_t *cache,
+    const char *cache_key,
+    const kc_flow_record_t *record,
+    int depth
+) {
+    const char *cached;
+    char *command;
+    char *output = NULL;
+    size_t output_size = 0;
+
+    if (!record || depth > 64) {
+        return NULL;
+    }
+    if (record->kind == KC_FLOW_VALUE_LITERAL) {
+        return kc_flow_template(
+            ctx,
+            flow_path,
+            record->value,
+            model,
+            flow,
+            current,
+            node_data,
+            cache,
+            depth + 1
+        );
+    }
+    cached = cache ? kc_flow_store_get(cache, cache_key) : NULL;
+    if (cached) {
+        return kc_flow_dup(cached);
+    }
+    command = kc_flow_template(
+        ctx,
+        flow_path,
+        record->value,
+        model,
+        flow,
+        current,
+        node_data,
+        cache,
+        depth + 1
+    );
+    if (!command) {
+        kc_flow_fail(ctx, "template expansion failed inside computed value");
+        return NULL;
+    }
+    if (kc_flow_run_command(
+        command,
+        flow_path,
+        NULL,
+        0,
+        model,
+        flow,
+        current,
+        node_data,
+        &output,
+        &output_size,
+        0
+    ) != KC_FLOW_OK) {
+        free(command);
+        kc_flow_fail(ctx, "computed value exited with non-zero status");
+        return NULL;
+    }
+    free(command);
+    kc_flow_chomp_one(output, &output_size);
+    if (cache && kc_flow_store_set(cache, cache_key, output) != KC_FLOW_OK) {
+        free(output);
+        kc_flow_fail(ctx, "unable to cache computed value");
+        return NULL;
+    }
+    return output;
+}
 
 /**
  * Resolve one specific key from a target node, possibly template-expanded.
@@ -1099,40 +1325,94 @@ static int kc_flow_collect_node_from(
  * @return Owned resolved value or NULL.
  */
 static char *kc_flow_resolve_node_value(
+    kc_flow_t *ctx,
+    const char *flow_path,
     kc_flow_model_t *model,
     const kc_flow_store_t *flow,
     const kc_flow_node_t *current,
     const kc_flow_store_t *current_data,
     const kc_flow_node_t *target,
     const char *key,
+    kc_flow_store_t *cache,
     int depth
 ) {
-    const char *value;
+    const kc_flow_record_t *record;
+    kc_flow_record_t special;
+    char cache_key[KC_FLOW_MAX_KEY * 2];
 
     if (depth > 64 || !target || !key || !*key) {
         return NULL;
     }
 
     if (target == current && current_data) {
-        value = kc_flow_store_get(current_data, key);
+        const char *value = kc_flow_store_get(current_data, key);
         if (value) {
             return kc_flow_dup(value);
         }
     }
 
-    if (strcmp(key, "file") == 0 && target->file) {
-        return kc_flow_template(target->file, model, flow, target, NULL, depth + 1);
-    }
-    if (strcmp(key, "exec") == 0 && target->exec) {
-        return kc_flow_template(target->exec, model, flow, target, NULL, depth + 1);
-    }
-
-    value = kc_flow_store_get(&target->data, key);
-    if (!value) {
+    if (snprintf(
+        cache_key,
+        sizeof(cache_key),
+        "node.%s.%s",
+        target->ref,
+        key
+    ) >= (int)sizeof(cache_key)) {
         return NULL;
     }
 
-    return kc_flow_template(value, model, flow, target, NULL, depth + 1);
+    if (strcmp(key, "file") == 0 && target->file) {
+        special.key = (char *)key;
+        special.value = target->file;
+        special.kind = target->file_kind ? target->file_kind : KC_FLOW_VALUE_LITERAL;
+        return kc_flow_resolve_record(
+            ctx,
+            flow_path,
+            model,
+            flow,
+            target,
+            NULL,
+            cache,
+            cache_key,
+            &special,
+            depth + 1
+        );
+    }
+    if (strcmp(key, "exec") == 0 && target->exec) {
+        special.key = (char *)key;
+        special.value = target->exec;
+        special.kind = target->exec_kind ? target->exec_kind : KC_FLOW_VALUE_LITERAL;
+        return kc_flow_resolve_record(
+            ctx,
+            flow_path,
+            model,
+            flow,
+            target,
+            NULL,
+            cache,
+            cache_key,
+            &special,
+            depth + 1
+        );
+    }
+
+    record = kc_flow_store_get_record(&target->data, key);
+    if (!record) {
+        return NULL;
+    }
+
+    return kc_flow_resolve_record(
+        ctx,
+        flow_path,
+        model,
+        flow,
+        target,
+        NULL,
+        cache,
+        cache_key,
+        record,
+        depth + 1
+    );
 }
 
 /**
@@ -1253,6 +1533,8 @@ static kc_flow_node_t *kc_flow_call_arg_node(
  * @return Owned resolved value or NULL.
  */
 static char *kc_flow_resolve_arg_value(
+    kc_flow_t *ctx,
+    const char *flow_path,
     kc_flow_model_t *model,
     const kc_flow_store_t *flow,
     const kc_flow_node_t *caller,
@@ -1260,6 +1542,7 @@ static char *kc_flow_resolve_arg_value(
     const kc_flow_node_t *arg_node,
     const char *prefix,
     const char *key,
+    kc_flow_store_t *cache,
     int depth
 ) {
     char full[KC_FLOW_MAX_KEY];
@@ -1279,12 +1562,15 @@ static char *kc_flow_resolve_arg_value(
     }
 
     return kc_flow_resolve_node_value(
+        ctx,
+        flow_path,
         model,
         flow,
         arg_node,
         NULL,
         arg_node,
         key,
+        cache,
         depth + 1
     );
 }
@@ -1303,6 +1589,8 @@ static char *kc_flow_resolve_arg_value(
  * @return Owned expanded body or NULL.
  */
 static char *kc_flow_expand_arg_tags(
+    kc_flow_t *ctx,
+    const char *flow_path,
     const char *text,
     kc_flow_model_t *model,
     const kc_flow_store_t *flow,
@@ -1310,6 +1598,7 @@ static char *kc_flow_expand_arg_tags(
     const kc_flow_store_t *caller_data,
     const kc_flow_node_t *arg_node,
     const char *prefix,
+    kc_flow_store_t *cache,
     int depth
 ) {
     char *out;
@@ -1356,6 +1645,8 @@ static char *kc_flow_expand_arg_tags(
             key[name_len - 4] = '\0';
 
             value = kc_flow_resolve_arg_value(
+                ctx,
+                flow_path,
                 model,
                 flow,
                 caller,
@@ -1363,6 +1654,7 @@ static char *kc_flow_expand_arg_tags(
                 arg_node,
                 prefix,
                 key,
+                cache,
                 depth + 1
             );
             if (!value) {
@@ -1403,11 +1695,14 @@ static char *kc_flow_expand_arg_tags(
  * @return Owned expanded call output or NULL.
  */
 static char *kc_flow_expand_call(
+    kc_flow_t *ctx,
+    const char *flow_path,
     const char *name,
     kc_flow_model_t *model,
     const kc_flow_store_t *flow,
     const kc_flow_node_t *caller,
     const kc_flow_store_t *caller_data,
+    kc_flow_store_t *cache,
     int depth
 ) {
     char fn_ref[KC_FLOW_MAX_KEY];
@@ -1446,6 +1741,8 @@ static char *kc_flow_expand_call(
     }
 
     with_args = kc_flow_expand_arg_tags(
+        ctx,
+        flow_path,
         behavior->exec,
         model,
         flow,
@@ -1453,6 +1750,7 @@ static char *kc_flow_expand_call(
         caller_data,
         arg_node,
         prefix,
+        cache,
         depth + 1
     );
     if (!with_args) {
@@ -1460,14 +1758,60 @@ static char *kc_flow_expand_call(
     }
 
     kc_flow_store_init(&fn_data);
-    if (kc_flow_collect_node_from(model, flow, fn_node, fn_node, &fn_data, 0) != KC_FLOW_OK) {
+    if (kc_flow_collect_node_from(
+        ctx,
+        flow_path,
+        model,
+        flow,
+        fn_node,
+        fn_node,
+        &fn_data,
+        cache,
+        0
+    ) != KC_FLOW_OK) {
         free(with_args);
         kc_flow_store_free(&fn_data);
         return NULL;
     }
 
-    expanded = kc_flow_template(with_args, model, flow, fn_node, &fn_data, depth + 1);
+    expanded = kc_flow_template(
+        ctx,
+        flow_path,
+        with_args,
+        model,
+        flow,
+        fn_node,
+        &fn_data,
+        cache,
+        depth + 1
+    );
     free(with_args);
+    if (expanded && behavior->exec_kind == KC_FLOW_VALUE_EXEC) {
+        char *output = NULL;
+        size_t output_size = 0;
+
+        if (kc_flow_run_command(
+            expanded,
+            flow_path,
+            NULL,
+            0,
+            model,
+            flow,
+            fn_node,
+            &fn_data,
+            &output,
+            &output_size,
+            0
+        ) != KC_FLOW_OK) {
+            free(expanded);
+            kc_flow_store_free(&fn_data);
+            kc_flow_fail(ctx, "computed value exited with non-zero status");
+            return NULL;
+        }
+        free(expanded);
+        kc_flow_chomp_one(output, &output_size);
+        expanded = output;
+    }
     kc_flow_store_free(&fn_data);
     return expanded;
 }
@@ -1483,11 +1827,14 @@ static char *kc_flow_expand_call(
  * @return Owned resolved value or NULL.
  */
 static char *kc_flow_resolve_ref(
+    kc_flow_t *ctx,
+    const char *flow_path,
     const char *name,
     kc_flow_model_t *model,
     const kc_flow_store_t *flow,
     const kc_flow_node_t *node,
     const kc_flow_store_t *node_data,
+    kc_flow_store_t *cache,
     int depth
 ) {
     if (depth > 64 || !name || !*name) {
@@ -1495,18 +1842,46 @@ static char *kc_flow_resolve_ref(
     }
 
     if (strncmp(name, "func.", 5) == 0 && strchr(name, ' ') != NULL) {
-        return kc_flow_expand_call(name, model, flow, node, node_data, depth + 1);
+        return kc_flow_expand_call(
+            ctx,
+            flow_path,
+            name,
+            model,
+            flow,
+            node,
+            node_data,
+            cache,
+            depth + 1
+        );
     }
 
     if (strncmp(name, "flow.", 5) == 0) {
         const char *key = name + 5;
-        const char *value;
+        const kc_flow_record_t *record;
+        char cache_key[KC_FLOW_MAX_KEY * 2];
 
         if (strcmp(key, "id") == 0 && model->id) {
             return kc_flow_dup(model->id);
         }
-        value = kc_flow_store_get(flow, key);
-        return value ? kc_flow_template(value, model, flow, node, node_data, depth + 1) : NULL;
+        record = kc_flow_store_get_record(flow, key);
+        if (!record) {
+            return NULL;
+        }
+        if (snprintf(cache_key, sizeof(cache_key), "flow.%s", key) >= (int)sizeof(cache_key)) {
+            return NULL;
+        }
+        return kc_flow_resolve_record(
+            ctx,
+            flow_path,
+            model,
+            flow,
+            node,
+            node_data,
+            cache,
+            cache_key,
+            record,
+            depth + 1
+        );
     }
 
     if (strncmp(name, "func.", 5) == 0) {
@@ -1524,12 +1899,15 @@ static char *kc_flow_resolve_ref(
                 target = kc_flow_model_find_func(model, ref);
                 if (target) {
                     return kc_flow_resolve_node_value(
+                        ctx,
+                        flow_path,
                         model,
                         flow,
                         target,
                         NULL,
                         target,
                         dot + 1,
+                        cache,
                         depth + 1
                     );
                 }
@@ -1537,12 +1915,15 @@ static char *kc_flow_resolve_ref(
         }
 
         return kc_flow_resolve_node_value(
+            ctx,
+            flow_path,
             model,
             flow,
             node,
             node_data,
             node,
             rest,
+            cache,
             depth + 1
         );
     }
@@ -1562,12 +1943,15 @@ static char *kc_flow_resolve_ref(
                 target = kc_flow_model_find(model, ref);
                 if (target) {
                     return kc_flow_resolve_node_value(
+                        ctx,
+                        flow_path,
                         model,
                         flow,
                         node,
                         node_data,
                         target,
                         dot + 1,
+                        cache,
                         depth + 1
                     );
                 }
@@ -1575,12 +1959,15 @@ static char *kc_flow_resolve_ref(
         }
 
         return kc_flow_resolve_node_value(
+            ctx,
+            flow_path,
             model,
             flow,
             node,
             node_data,
             node,
             rest,
+            cache,
             depth + 1
         );
     }
@@ -1599,11 +1986,14 @@ static char *kc_flow_resolve_ref(
  * @return Resolved heap string or NULL.
  */
 static char *kc_flow_template(
+    kc_flow_t *ctx,
+    const char *flow_path,
     const char *text,
     kc_flow_model_t *model,
     const kc_flow_store_t *flow,
     const kc_flow_node_t *node,
     const kc_flow_store_t *node_data,
+    kc_flow_store_t *cache,
     int depth
 ) {
     char *out;
@@ -1652,13 +2042,26 @@ static char *kc_flow_template(
             memcpy(name, text + i + 1, name_len);
             name[name_len] = '\0';
 
-            resolved_name = kc_flow_template(name, model, flow, node, node_data, depth + 1);
+            resolved_name = kc_flow_template(
+                ctx,
+                flow_path,
+                name,
+                model,
+                flow,
+                node,
+                node_data,
+                cache,
+                depth + 1
+            );
             value = kc_flow_resolve_ref(
+                ctx,
+                flow_path,
                 resolved_name ? resolved_name : name,
                 model,
                 flow,
                 node,
                 node_data,
+                cache,
                 depth + 1
             );
             free(resolved_name);
@@ -1693,11 +2096,14 @@ static char *kc_flow_template(
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
 static int kc_flow_collect_node_from(
+    kc_flow_t *ctx,
+    const char *flow_path,
     kc_flow_model_t *model,
     const kc_flow_store_t *flow,
     const kc_flow_node_t *current,
     const kc_flow_node_t *source,
     kc_flow_store_t *out,
+    kc_flow_store_t *cache,
     int depth
 ) {
     size_t i;
@@ -1711,13 +2117,46 @@ static int kc_flow_collect_node_from(
         if (!base) {
             base = kc_flow_model_find(model, source->use);
         }
-        if (!base || kc_flow_collect_node_from(model, flow, current, base, out, depth + 1) != KC_FLOW_OK) {
+        if (!base || kc_flow_collect_node_from(
+            ctx,
+            flow_path,
+            model,
+            flow,
+            current,
+            base,
+            out,
+            cache,
+            depth + 1
+        ) != KC_FLOW_OK) {
             return KC_FLOW_ERROR;
         }
     }
 
     for (i = 0; i < source->data.count; ++i) {
-        char *value = kc_flow_template(source->data.items[i].value, model, flow, current, out, 0);
+        char cache_key[KC_FLOW_MAX_KEY * 2];
+        char *value;
+
+        if (snprintf(
+            cache_key,
+            sizeof(cache_key),
+            "node.%s.%s",
+            source->ref,
+            source->data.items[i].key
+        ) >= (int)sizeof(cache_key)) {
+            return KC_FLOW_ERROR;
+        }
+        value = kc_flow_resolve_record(
+            ctx,
+            flow_path,
+            model,
+            flow,
+            current,
+            out,
+            cache,
+            cache_key,
+            &source->data.items[i],
+            0
+        );
         if (!value) {
             return KC_FLOW_ERROR;
         }
@@ -1738,9 +2177,27 @@ static int kc_flow_collect_node_from(
  * @param out Output store.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-static int kc_flow_collect_node(kc_flow_model_t *model, const kc_flow_store_t *flow, const kc_flow_node_t *node, kc_flow_store_t *out) {
+static int kc_flow_collect_node(
+    kc_flow_t *ctx,
+    const char *flow_path,
+    kc_flow_model_t *model,
+    const kc_flow_store_t *flow,
+    const kc_flow_node_t *node,
+    kc_flow_store_t *out,
+    kc_flow_store_t *cache
+) {
     kc_flow_store_init(out);
-    if (kc_flow_collect_node_from(model, flow, node, node, out, 0) != KC_FLOW_OK) {
+    if (kc_flow_collect_node_from(
+        ctx,
+        flow_path,
+        model,
+        flow,
+        node,
+        node,
+        out,
+        cache,
+        0
+    ) != KC_FLOW_OK) {
         kc_flow_store_free(out);
         return KC_FLOW_ERROR;
     }
@@ -1889,15 +2346,28 @@ static int kc_flow_node_env_prefix(char *out, size_t out_size, const char *ref) 
 static int kc_flow_set_env_nodes(kc_flow_model_t *model, const kc_flow_store_t *flow) {
     size_t i;
 
+    (void)flow;
     for (i = 0; i < model->node_count; ++i) {
-        kc_flow_store_t data;
         char prefix[KC_FLOW_MAX_KEY];
+        kc_flow_store_t data;
+        size_t j;
 
         if (kc_flow_node_env_prefix(prefix, sizeof(prefix), model->nodes[i].ref) != KC_FLOW_OK) {
             return KC_FLOW_ERROR;
         }
-        if (kc_flow_collect_node(model, flow, &model->nodes[i], &data) != KC_FLOW_OK) {
-            return KC_FLOW_ERROR;
+        kc_flow_store_init(&data);
+        for (j = 0; j < model->nodes[i].data.count; ++j) {
+            if (model->nodes[i].data.items[j].kind != KC_FLOW_VALUE_LITERAL) {
+                continue;
+            }
+            if (kc_flow_store_set(
+                &data,
+                model->nodes[i].data.items[j].key,
+                model->nodes[i].data.items[j].value
+            ) != KC_FLOW_OK) {
+                kc_flow_store_free(&data);
+                return KC_FLOW_ERROR;
+            }
         }
         if (kc_flow_set_env_store(prefix, &data) != KC_FLOW_OK) {
             kc_flow_store_free(&data);
@@ -2361,7 +2831,42 @@ static int kc_flow_run_child(
         }
     }
     for (i = 0; rc == KC_FLOW_OK && i < model->entries.count; ++i) {
-        kc_flow_node_t *entry = kc_flow_model_find(model, model->entries.items[i]);
+        kc_flow_store_t cache;
+        char cache_key[KC_FLOW_MAX_KEY];
+        char *target;
+        kc_flow_node_t *entry;
+
+        kc_flow_store_init(&cache);
+        if (snprintf(
+            cache_key,
+            sizeof(cache_key),
+            "flow.link.%lu",
+            (unsigned long)i
+        ) >= (int)sizeof(cache_key)) {
+            kc_flow_store_free(&cache);
+            rc = kc_flow_fail(ctx, "unable to resolve child entry");
+            break;
+        }
+        target = kc_flow_resolve_record(
+            ctx,
+            path,
+            model,
+            &params,
+            NULL,
+            NULL,
+            &cache,
+            cache_key,
+            &model->entries.items[i],
+            0
+        );
+        kc_flow_store_free(&cache);
+        if (!target || !*target) {
+            free(target);
+            rc = kc_flow_fail(ctx, "computed link resolved to empty target");
+            break;
+        }
+        entry = kc_flow_model_find(model, target);
+        free(target);
         if (!entry || kc_flow_run_node(ctx, path, model, &params, entry, input, outputs, depth + 1) != KC_FLOW_OK) {
             rc = kc_flow_fail(ctx, "child flow execution failed");
         }
@@ -2394,6 +2899,7 @@ static int kc_flow_run_node(
     int depth
 ) {
     kc_flow_store_t node_data;
+    kc_flow_store_t cache;
     kc_flow_branches_t active;
     const kc_flow_node_t *behavior;
     size_t i;
@@ -2408,23 +2914,52 @@ static int kc_flow_run_node(
         return kc_flow_fail(ctx, "invalid node use");
     }
 
-    if (kc_flow_collect_node(model, flow_data, node, &node_data) != KC_FLOW_OK) {
+    kc_flow_store_init(&cache);
+    if (kc_flow_collect_node(
+        ctx,
+        flow_path,
+        model,
+        flow_data,
+        node,
+        &node_data,
+        &cache
+    ) != KC_FLOW_OK) {
+        kc_flow_store_free(&cache);
         return kc_flow_fail(ctx, "unable to resolve node data");
     }
     kc_flow_branches_init(&active);
     if (kc_flow_branches_copy(&active, input->data, input->size) != KC_FLOW_OK) {
         kc_flow_store_free(&node_data);
+        kc_flow_store_free(&cache);
         return kc_flow_fail(ctx, "unable to create branch");
     }
     if (behavior->file && *behavior->file) {
         kc_flow_branches_t next;
-        char *file = kc_flow_template(behavior->file, model, flow_data, node, &node_data, 0);
+        kc_flow_record_t record;
+        char *file;
         char child_path[KC_FLOW_MAX_PATH];
+
+        record.key = (char *)"file";
+        record.value = behavior->file;
+        record.kind = behavior->file_kind ? behavior->file_kind : KC_FLOW_VALUE_LITERAL;
+        file = kc_flow_resolve_record(
+            ctx,
+            flow_path,
+            model,
+            flow_data,
+            node,
+            &node_data,
+            &cache,
+            "node.file",
+            &record,
+            0
+        );
         kc_flow_branches_init(&next);
         if (!file || kc_flow_relative_path(child_path, sizeof(child_path), flow_path, file) != KC_FLOW_OK) {
             free(file);
             kc_flow_branches_free(&active);
             kc_flow_store_free(&node_data);
+            kc_flow_store_free(&cache);
             return kc_flow_fail(ctx, "invalid child flow path");
         }
         free(file);
@@ -2438,7 +2973,17 @@ static int kc_flow_run_node(
         kc_flow_branches_t next;
         kc_flow_branches_init(&next);
         for (i = 0; rc == KC_FLOW_OK && i < active.count; ++i) {
-            char *command = kc_flow_template(behavior->exec, model, flow_data, node, &node_data, 0);
+            char *command = kc_flow_template(
+                ctx,
+                flow_path,
+                behavior->exec,
+                model,
+                flow_data,
+                node,
+                &node_data,
+                &cache,
+                0
+            );
             char *out = NULL;
             size_t out_size = 0;
             const char *ignore = kc_flow_store_get(&node_data, "ignore_error");
@@ -2460,9 +3005,45 @@ static int kc_flow_run_node(
         for (i = 0; rc == KC_FLOW_OK && i < active.count; ++i) {
             size_t j;
             for (j = 0; rc == KC_FLOW_OK && j < node->links.count; ++j) {
-                kc_flow_node_t *next = kc_flow_model_find(model, node->links.items[j]);
+                char cache_key[KC_FLOW_MAX_KEY * 2];
+                char *target;
+                kc_flow_node_t *next;
+
+                if (snprintf(
+                    cache_key,
+                    sizeof(cache_key),
+                    "node.%s.link.%lu",
+                    node->ref,
+                    (unsigned long)j
+                ) >= (int)sizeof(cache_key)) {
+                    rc = kc_flow_fail(ctx, "unable to resolve computed link");
+                    break;
+                }
+                target = kc_flow_resolve_record(
+                    ctx,
+                    flow_path,
+                    model,
+                    flow_data,
+                    node,
+                    &node_data,
+                    &cache,
+                    cache_key,
+                    &node->links.items[j],
+                    0
+                );
+                if (!target) {
+                    rc = kc_flow_fail(ctx, "unable to execute computed link");
+                    break;
+                }
+                if (!*target) {
+                    free(target);
+                    rc = kc_flow_fail(ctx, "computed link resolved to empty target");
+                    break;
+                }
+                next = kc_flow_model_find(model, target);
+                free(target);
                 if (!next) {
-                    rc = kc_flow_fail(ctx, "unknown node link");
+                    rc = kc_flow_fail(ctx, "computed link target not found");
                 } else {
                     rc = kc_flow_run_node(ctx, flow_path, model, flow_data, next, &active.items[i], outputs, depth + 1);
                 }
@@ -2475,6 +3056,7 @@ static int kc_flow_run_node(
     }
     kc_flow_branches_free(&active);
     kc_flow_store_free(&node_data);
+    kc_flow_store_free(&cache);
     return rc;
 }
 
@@ -2568,8 +3150,47 @@ static int kc_flow_exec_loaded(
         rc = node ? kc_flow_run_node(ctx, path, model, &params, node, &start, &outputs, 0) : kc_flow_fail(ctx, "unknown entry");
     } else {
         for (i = 0; rc == KC_FLOW_OK && i < model->entries.count; ++i) {
-            kc_flow_node_t *node = kc_flow_model_find(model, model->entries.items[i]);
-            rc = node ? kc_flow_run_node(ctx, path, model, &params, node, &start, &outputs, 0) : kc_flow_fail(ctx, "unknown entry");
+            kc_flow_store_t cache;
+            char cache_key[KC_FLOW_MAX_KEY];
+            char *target;
+            kc_flow_node_t *node;
+
+            kc_flow_store_init(&cache);
+            if (snprintf(
+                cache_key,
+                sizeof(cache_key),
+                "flow.link.%lu",
+                (unsigned long)i
+            ) >= (int)sizeof(cache_key)) {
+                kc_flow_store_free(&cache);
+                rc = kc_flow_fail(ctx, "unable to resolve flow entry");
+                break;
+            }
+            target = kc_flow_resolve_record(
+                ctx,
+                path,
+                model,
+                &params,
+                NULL,
+                NULL,
+                &cache,
+                cache_key,
+                &model->entries.items[i],
+                0
+            );
+            kc_flow_store_free(&cache);
+            if (!target) {
+                rc = kc_flow_fail(ctx, "unable to resolve flow entry");
+                break;
+            }
+            if (!*target) {
+                free(target);
+                rc = kc_flow_fail(ctx, "computed link resolved to empty target");
+                break;
+            }
+            node = kc_flow_model_find(model, target);
+            free(target);
+            rc = node ? kc_flow_run_node(ctx, path, model, &params, node, &start, &outputs, 0) : kc_flow_fail(ctx, "computed link target not found");
         }
     }
     for (i = 0; rc == KC_FLOW_OK && i < outputs.count; ++i) {

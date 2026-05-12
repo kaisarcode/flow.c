@@ -1,0 +1,55 @@
+flow.id=tiny-site
+flow.site=Tiny Flow Site
+flow.path=/robots.txt
+flow.link=request
+
+func.status.exec=<<EOF
+printf "%s %s" "<arg.code>" "<arg.label>"
+EOF
+
+node.page.file=page.flow
+node.page.site=<flow.site>
+
+node.request.link=<<EOF
+case "<flow.path>" in
+    "/") printf home ;;
+    "/robots.txt") printf robots ;;
+    *) printf missing ;;
+esac
+EOF
+
+node.home.use=page
+node.home.slug=home
+node.home.heading=Home
+node.home.body=Welcome to the tiny flow site.
+node.home.status=<func.status home.status>
+node.home.status.code=200
+node.home.status.label=OK
+node.home.link=audit
+
+node.robots.use=page
+node.robots.slug=robots
+node.robots.heading=Robots
+node.robots.body=User-agent: *
+node.robots.status=<func.status robots.status>
+node.robots.status.code=200
+node.robots.status.label=OK
+node.robots.link=audit
+
+node.missing.use=page
+node.missing.slug=missing
+node.missing.heading=Missing
+node.missing.body=Nothing lives at <flow.path>.
+node.missing.status=<func.status missing.status>
+node.missing.status.code=404
+node.missing.status.label=NOT_FOUND
+node.missing.link=audit
+
+node.audit.exec=cat
+node.audit.link=emit
+node.audit.link=word-count
+node.audit.link=checksum
+
+node.emit.exec=cat
+node.word-count.exec=printf "\n-- words: "; wc -w
+node.checksum.exec=printf "\n-- checksum: "; cksum | cut -d ' ' -f 1

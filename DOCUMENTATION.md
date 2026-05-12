@@ -76,6 +76,29 @@ Functions can be called **anywhere**, including inside other data keys, allowing
 
 ---
 
+## Cohesive Example Project
+
+The `etc` directory contains a tiny static-site request pipeline:
+
+- `site.flow` is the main flow.
+- `page.flow` is the reusable page renderer.
+
+The project uses only default Linux commands and shell features. It shows a
+computed `node.link` route, shared behavior through `node.use`, a child flow
+through `node.file`, reusable `func.*` values, executable heredoc fields,
+standard stdin/stdout piping, and fan-out to several audit branches.
+
+Run it with:
+
+```bash
+./bin/x86_64/linux/flow etc/site.flow
+./bin/x86_64/linux/flow etc/site.flow --set flow.path=/
+./bin/x86_64/linux/flow etc/site.flow --set flow.path=/missing
+printf "draft body" | ./bin/x86_64/linux/flow etc/page.flow
+```
+
+---
+
 ## Behavior Inheritance (`node.use`)
 
 The `use` key allows a node to "borrow" the behavior (`exec` or `file`) and the data of another node.
@@ -165,4 +188,3 @@ Flow elements can be represented as follows:
 **License:** [GNU GPL v3.0](https://www.gnu.org/licenses/gpl-3.0.html)
 
 © 2026 KaisarCode
-
