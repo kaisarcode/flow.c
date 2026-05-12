@@ -1231,6 +1231,8 @@ static void kc_flow_chomp_one(char *value, size_t *size) {
  * @param cache Per-node value cache.
  * @param cache_key Cache key.
  * @param record Source value record.
+ * @param input Input data for executable values.
+ * @param input_size Input data size.
  * @param depth Recursion guard.
  * @return Owned resolved value or NULL.
  */
@@ -1244,6 +1246,8 @@ static char *kc_flow_resolve_record(
     kc_flow_store_t *cache,
     const char *cache_key,
     const kc_flow_record_t *record,
+    const void *input,
+    size_t input_size,
     int depth
 ) {
     const char *cached;
@@ -1289,8 +1293,8 @@ static char *kc_flow_resolve_record(
     if (kc_flow_run_command(
         command,
         flow_path,
-        NULL,
-        0,
+        input,
+        input_size,
         model,
         flow,
         current,
@@ -1375,6 +1379,8 @@ static char *kc_flow_resolve_node_value(
             cache,
             cache_key,
             &special,
+            NULL,
+            0,
             depth + 1
         );
     }
@@ -1392,6 +1398,8 @@ static char *kc_flow_resolve_node_value(
             cache,
             cache_key,
             &special,
+            NULL,
+            0,
             depth + 1
         );
     }
@@ -1411,6 +1419,8 @@ static char *kc_flow_resolve_node_value(
         cache,
         cache_key,
         record,
+        NULL,
+        0,
         depth + 1
     );
 }
@@ -1880,6 +1890,8 @@ static char *kc_flow_resolve_ref(
             cache,
             cache_key,
             record,
+            NULL,
+            0,
             depth + 1
         );
     }
@@ -2155,6 +2167,8 @@ static int kc_flow_collect_node_from(
             cache,
             cache_key,
             &source->data.items[i],
+            NULL,
+            0,
             0
         );
         if (!value) {
@@ -2857,6 +2871,8 @@ static int kc_flow_run_child(
             &cache,
             cache_key,
             &model->entries.items[i],
+            NULL,
+            0,
             0
         );
         kc_flow_store_free(&cache);
@@ -2952,6 +2968,8 @@ static int kc_flow_run_node(
             &cache,
             "node.file",
             &record,
+            NULL,
+            0,
             0
         );
         kc_flow_branches_init(&next);
@@ -3029,6 +3047,8 @@ static int kc_flow_run_node(
                     &cache,
                     cache_key,
                     &node->links.items[j],
+                    active.items[i].data,
+                    active.items[i].size,
                     0
                 );
                 if (!target) {
@@ -3176,6 +3196,8 @@ static int kc_flow_exec_loaded(
                 &cache,
                 cache_key,
                 &model->entries.items[i],
+                NULL,
+                0,
                 0
             );
             kc_flow_store_free(&cache);

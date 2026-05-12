@@ -162,6 +162,18 @@ EOF_LINK_B
 node.a.exec=printf A
 node.b.exec=printf B
 EOF
+    cat > "$TMP/heredoc-link-stdin.flow" <<'EOF'
+flow.link=router
+node.router.exec=sed -n 's/^request.path=//p'
+node.router.link=<<EOF_LINK
+case "$(cat)" in
+    "/") printf home ;;
+    *) printf not_found ;;
+esac
+EOF_LINK
+node.home.exec=printf home
+node.not_found.exec=printf missing
+EOF
     cat > "$TMP/heredoc-link-missing.flow" <<'EOF'
 flow.link=router
 node.router.link=<<EOF_LINK
@@ -253,6 +265,11 @@ test_runtime() {
     kc_test_pass "computed link"
     assert_output "AB" "computed link ordering failed" "$BIN" "$TMP/heredoc-multiple-links.flow"
     kc_test_pass "computed link ordering"
+    output=$(printf 'request.path=/\n' | "$BIN" "$TMP/heredoc-link-stdin.flow")
+    [ "$output" = "home" ] || kc_test_fail "computed link stdin routing failed"
+    output=$(printf 'request.path=/missing\n' | "$BIN" "$TMP/heredoc-link-stdin.flow")
+    [ "$output" = "missing" ] || kc_test_fail "computed link stdin fallback failed"
+    kc_test_pass "computed link receives branch stdin"
     "$BIN" "$TMP/heredoc-link-missing.flow" 2>"$TMP/missing.err" >/dev/null && kc_test_fail "missing computed link target should fail"
     grep -q "computed link target not found" "$TMP/missing.err" || kc_test_fail "missing computed link error unclear"
     kc_test_pass "computed link missing target failure"
