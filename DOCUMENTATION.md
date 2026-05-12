@@ -98,10 +98,12 @@ node.job1.task_name=Build
 
 The flat dotted structure is perfectly suited for visual graphing:
 
-- **Boxes**: Each `node.<ref>` is a box.
-- **Connectors**: `node.<ref>.link=<target>` is a solid arrow.
-- **Inheritance**: `node.<ref>.use=<template>` is a dashed arrow.
-- **Sub-graphs**: `node.<ref>.file` is a collapsible or nested graph.
+- **Boxes**: Each `node.{ref}` is a box.
+- **Connectors**: `node.{ref}.link={target}` is a solid arrow.
+- **Inheritance**: `node.{ref}.use={template}` is a dashed arrow.
+- **Functions**: `func.{name}` is a distinct "Trait" or "Tool" (often visualized with a distinct color or grouped in a side toolbox).
+- **Function Usage**: A call `<func.{name} {arg}>` is a dynamic expansion relationship, visualized as a link to the function or a label in the attribute.
+- **Sub-graphs**: `node.{ref}.file` is a collapsible or nested graph.
 - **Data Attributes**: All other keys are listed as attributes inside the box.
 
 ---
