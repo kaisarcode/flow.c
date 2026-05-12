@@ -1,6 +1,25 @@
 flow.id=child
-flow.param.hello=Hello
-flow.param.world=World
-flow.link=node-1
+flow.hello=Hello
+flow.world=World
+flow.link=greet
 
-node.node-1.exec=printf "%s" "<flow.param.hello> <flow.param.world>"
+# Data-only node for shared configuration
+node.config.prefix=>>
+node.config.suffix=<<
+
+# Reusable template using node.use
+node.base-exec.exec=printf "%s %s %s" "<node.config.prefix>" "<node.greeting> <node.name>" "<node.config.suffix>"
+
+# Specialized node
+node.greet.use=base-exec
+node.greet.greeting=<flow.hello>
+node.greet.name=<flow.world>
+node.greet.link=final-touch
+
+# Function expansion using a heredoc
+func.mark.exec=<<EOF
+printf "!!! %s !!!" "<arg.val>"
+EOF
+
+node.final-touch.exec=<func.mark final-touch.data>
+node.final-touch.data.val=DONE

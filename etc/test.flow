@@ -1,0 +1,4 @@
+flow.link=root
+func.test.exec=printf "FUNC <arg.msg>"
+node.root.exec=<func.test root.data>
+node.root.data.msg=Hello

@@ -1,13 +1,23 @@
 flow.id=parent
-flow.param.hello=Hello
-flow.link=node-1
+flow.link=run-child
 
-node.node-1.file=child.flow
-node.node-1.param.hello=<flow.param.hello>
-node.node-1.link=node-2
+# Data used by child
+flow.greeting=Hola
 
-node.node-2.exec=cat; printf "%s" "<node.param.hello> Mundo"
-node.node-2.param.hello=Hola
+# Behavior node
+node.reporter.exec=printf "Report: "; cat; printf "\n"
+node.reporter.link=summary
 
-node.node-3.file=child.flow
-node.node-3.param.hello=Bonjour
+# Use a heredoc for complex formatting
+node.summary.exec=<<EOF
+printf "========================================\n"
+printf "Flow ID: <flow.id>\n"
+printf "Output:  "
+cat
+printf "========================================\n"
+EOF
+
+# Run child and pipe to reporter
+node.run-child.file=child.flow
+node.run-child.hello=<flow.greeting>
+node.run-child.link=reporter

@@ -50,10 +50,10 @@ Write a flow that passes parameters to a child flow:
 
 ```flow
 flow.link=greet
-flow.param.name=World
+flow.name=World
 
 node.greet.file=child.flow
-node.greet.param.name=<flow.param.name>
+node.greet.name=<flow.name>
 node.greet.link=suffix
 
 node.suffix.exec=cat; printf "%s" "!"
@@ -61,9 +61,45 @@ node.suffix.exec=cat; printf "%s" "!"
 
 ```flow
 flow.link=print
-flow.param.name=Friend
+flow.name=Friend
 
-node.print.exec=printf "%s" "Hello <flow.param.name>"
+node.print.exec=printf "%s" "Hello <flow.name>"
+```
+
+Write a flow using `node.use` for behavior inheritance:
+
+```flow
+flow.link=robots
+
+node.build.status=200
+node.build.exec=<<EOF
+cat "<node.source>" | http build response --status <node.status>
+EOF
+
+node.robots.use=build
+node.robots.source=robots.txt
+```
+
+Write a flow using `func` for reusable templates:
+
+```flow
+flow.link=router
+
+func.static.exec=<<EOF
+[ "$REQUEST_PATH" = "<arg.path>" ] && {
+  cat "<arg.source>" | http build response --status 200
+  exit 0
+}
+EOF
+
+node.route.robots.path=/robots.txt
+node.route.robots.source=robots.txt
+
+node.router.exec=<<EOF
+REQUEST_PATH="${REQUEST_PATH:-/}"
+<func.static route.robots>
+printf "Not found" | http build response --status 404
+EOF
 ```
 
 Overlay one effective flow document:
@@ -107,7 +143,7 @@ kc_flow_t *ctx = kc_flow_open();
 char *output = NULL;
 size_t output_size = 0;
 
-kc_flow_set(ctx, "flow.param.hello", "Hello");
+kc_flow_set(ctx, "flow.hello", "Hello");
 kc_flow_exec(ctx, "etc/parent.flow", NULL, 0, &output, &output_size);
 
 kc_flow_free(output);

@@ -673,7 +673,8 @@ static kc_flow_node_t *kc_flow_model_find_func(kc_flow_model_t *model, const cha
 
 /**
  * Resolve one node behavior source through node.<ref>.use.
- * The caller node keeps its own data and links; the behavior node provides file/exec.
+ * The caller node keeps its own data and links; the behavior node provides
+ * file/exec.
  * @param model Model pointer.
  * @param node Caller node pointer.
  * @param depth Recursion guard.
@@ -719,7 +720,6 @@ static kc_flow_node_t *kc_flow_model_node(kc_flow_model_t *model, const char *re
     }
     return node;
 }
-
 
 /**
  * Resolve or create one parsed function.
@@ -1087,6 +1087,17 @@ static int kc_flow_collect_node_from(
     int depth
 );
 
+/**
+ * Resolve one specific key from a target node, possibly template-expanded.
+ * @param model Parsed model.
+ * @param flow Flow data.
+ * @param current Current node (for template context).
+ * @param current_data Resolved current data.
+ * @param target Target node to read from.
+ * @param key Key to resolve.
+ * @param depth Recursion guard.
+ * @return Owned resolved value or NULL.
+ */
 static char *kc_flow_resolve_node_value(
     kc_flow_model_t *model,
     const kc_flow_store_t *flow,
@@ -1461,7 +1472,6 @@ static char *kc_flow_expand_call(
     return expanded;
 }
 
-
 /**
  * Resolve one placeholder reference.
  * @param name Placeholder name without angle brackets.
@@ -1720,6 +1730,14 @@ static int kc_flow_collect_node_from(
     return KC_FLOW_OK;
 }
 
+/**
+ * Collect all data for one node into a store.
+ * @param model Parsed model.
+ * @param flow Flow data.
+ * @param node Node pointer.
+ * @param out Output store.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
+ */
 static int kc_flow_collect_node(kc_flow_model_t *model, const kc_flow_store_t *flow, const kc_flow_node_t *node, kc_flow_store_t *out) {
     kc_flow_store_init(out);
     if (kc_flow_collect_node_from(model, flow, node, node, out, 0) != KC_FLOW_OK) {
