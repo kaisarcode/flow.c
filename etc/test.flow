@@ -1,10 +1,5 @@
 flow.link=root
+flow.msg=Global
 
-func.hello.exec=Hello <arg.name>
-
-# Call func inside a data key
-node.data.name=World
-node.data.msg=<func.hello data>
-
-# Use that resolved data key in exec
-node.root.exec=printf "Message: <node.data.msg>"
+node.root.msg=Local
+node.root.exec=printf "Local: <node.msg>, Global: <flow.msg>, Bare: <msg>"
