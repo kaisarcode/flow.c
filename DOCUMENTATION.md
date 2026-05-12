@@ -143,3 +143,22 @@ Using `func.*` and `node.use` to define a declarative routing table that expands
 
 ### System Orchestration
 Wrapping complex `docker`, `git`, or `rsync` commands into reusable blocks that share global configuration (like paths or credentials).
+
+### AI & LLM Orchestration
+Chaining prompt templates, context retrieval, and model inference. `flow.c` is ideal for feeding the output of one model (as a stream) into the next stage for refinement or evaluation.
+
+### Universal Automation
+From simple cron jobs (automated backups, log rotation) to complex CI/CD pipelines (build -> test -> deploy). `flow.c` provides a declarative way to manage the lifecycle of any recurring task.
+
+---
+
+**Author:** KaisarCode
+
+**Email:** <kaisar@kaisarcode.com>
+
+**Website:** [https://kaisarcode.com](https://kaisarcode.com)
+
+**License:** [GNU GPL v3.0](https://www.gnu.org/licenses/gpl-3.0.html)
+
+© 2026 KaisarCode
+
