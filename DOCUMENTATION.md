@@ -4,7 +4,7 @@
 
 ---
 
-## 1. Philosophy: The Orthodox Pipeline
+## Philosophy: The Orthodox Pipeline
 
 `flow.c` is built on a strict "orthodox" piping model:
 
@@ -16,7 +16,7 @@
 
 ---
 
-## 2. The Dotted-Document Model
+## The Dotted-Document Model
 
 A `.flow` file is an ordered collection of key-value pairs using a dotted namespace.
 
@@ -41,7 +41,7 @@ A `.flow` file is an ordered collection of key-value pairs using a dotted namesp
 
 ---
 
-## 3. Template Expansion & Functions
+## Template Expansion & Functions
 
 `flow.c` uses a template engine that resolves tags in `<...>` before any command is executed or any child flow is loaded.
 
@@ -76,7 +76,7 @@ Functions can be called **anywhere**, including inside other data keys, allowing
 
 ---
 
-## 4. Behavior Inheritance (`node.use`)
+## Behavior Inheritance (`node.use`)
 
 The `use` key allows a node to "borrow" the behavior (`exec` or `file`) and the data of another node.
 
@@ -94,21 +94,7 @@ node.job1.task_name=Build
 
 ---
 
-## 5. Visual Representation (Graphing)
-
-The flat dotted structure is perfectly suited for visual graphing:
-
-- **Boxes**: Each `node.{ref}` is a box.
-- **Connectors**: `node.{ref}.link={target}` is a solid arrow.
-- **Inheritance**: `node.{ref}.use={template}` is a dashed arrow.
-- **Functions**: `func.{name}` is a distinct "Trait" or "Tool" (often visualized with a distinct color or grouped in a side toolbox).
-- **Function Usage**: A call `<func.{name} {arg}>` is a dynamic expansion relationship, visualized as a link to the function or a label in the attribute.
-- **Sub-graphs**: `node.{ref}.file` is a collapsible or nested graph.
-- **Data Attributes**: All other keys are listed as attributes inside the box.
-
----
-
-## 6. Best Practices & Know-How
+## Best Practices & Know-How
 
 ### Descriptive Naming
 Use dots to group data logically:
@@ -133,7 +119,7 @@ Every data key is exported to the sub-process environment:
 
 ---
 
-## 7. Common Use Cases
+## Common Use Cases
 
 ### Asset Pipelines
 Chaining minifiers, compilers, and uploaders using independent branches for different file types.
@@ -149,6 +135,24 @@ Chaining prompt templates, context retrieval, and model inference. `flow.c` is i
 
 ### Universal Automation
 From simple cron jobs (automated backups, log rotation) to complex CI/CD pipelines (build -> test -> deploy). `flow.c` provides a declarative way to manage the lifecycle of any recurring task.
+
+---
+
+## Future Development - Visual Representation
+
+Flow does not provide GUI capabilities. Its scope is the execution and composition of dotted flow documents, not visual editing.
+
+However, the flat dotted structure is well suited for graph visualization, and the format was designed with that possibility in mind. A future companion tool may provide visualization and editing capabilities without changing the runtime model.
+
+Flow elements can be represented as follows:
+
+- **Boxes**: Each `node.{ref}` is a box.
+- **Connectors**: `node.{ref}.link={target}` is a solid arrow.
+- **Inheritance**: `node.{ref}.use={template}` is a dashed arrow.
+- **Functions**: Each `func.{name}` is a distinct trait or tool, often visualized with a distinct color or grouped in a side toolbox.
+- **Function Usage**: A call such as `<func.{name} {arg}>` is a dynamic expansion relationship, visualized as a link to the function or as a label in the attribute.
+- **Sub-graphs**: Each `node.{ref}.file` is a collapsible or nested graph.
+- **Data Attributes**: All other keys are listed as attributes inside the box.
 
 ---
 
