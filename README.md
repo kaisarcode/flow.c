@@ -6,8 +6,7 @@ and writes the final branch output to stdout.
 
 The model is branch-oriented: a flow declares entry nodes, nodes can execute
 commands, expand child flows, and fan out through links. Branches stay
-independent and do not merge. `flow.c` is not a visual graph editor and it is
-not a contract or port runtime.
+independent and do not merge.
 
 ---
 
@@ -268,6 +267,14 @@ make mips64el/linux
 make s390x/linux
 make loongarch64/linux
 ```
+
+---
+
+## Visualization
+
+`flow.c` is a strict execution engine dedicated to running shell command workflows.
+For rendering visual graph representations of `.flow` documents, you can check the
+[fldot](https://github.com/kaisarcode/fldot) conversion tool.
 
 ---
 
