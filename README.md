@@ -272,7 +272,7 @@ make loongarch64/linux
 
 ## Visualization
 
-`flow.c` is a strict execution engine dedicated to running shell command workflows.
+`flow.c` is a strict execution engine dedicated to running system command workflows.
 For rendering visual graph representations of `.flow` documents, you can check the
 [fldot](https://github.com/kaisarcode/fldot) conversion tool.
 
