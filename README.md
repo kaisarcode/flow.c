@@ -167,6 +167,27 @@ The key determines how the computed value is used:
 - `node.link` computes the downstream node name.
 - Other fields compute the final parameter value.
 
+### Metadata Convention
+
+`flow.c` treats unreserved keys as ordinary data. By convention, `meta` is the
+namespace for metadata about the flow document, a node, a function, or another
+Flow element. This keeps display-oriented data away from runtime fields such as
+`title`, `summary`, `status`, or other project-specific values.
+
+```flow
+flow.meta.title=Tiny Site Runtime
+flow.meta.summary=Routes one request path to a page or asset response.
+
+node.request.meta.title=Request Router
+node.request.meta.summary=Maps request paths to route nodes.
+
+func.response.meta.summary=Builds the HTTP response envelope.
+```
+
+The runtime does not give `meta` special behavior. Tools may use
+`*.meta.title`, `*.meta.summary`, or other `*.meta.*` fields to render graph
+labels, tooltips, inspectors, or documentation.
+
 Overlay one effective flow document:
 
 ```bash
