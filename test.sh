@@ -209,6 +209,18 @@ printf "%s" "$n"
 EOF_VALUE
 node.x.exec=printf "%s" "<node.value>"
 EOF
+    cat > "$TMP/quote.flow" <<'EOF'
+flow.link=x
+node.x.double=He said "hi" with $HOME and `ticks`
+node.x.single=can't stop
+node.x.exec=printf "%s\n%s" "<node.x.double>" '<node.x.single>'
+EOF
+    cat > "$TMP/quote-func.flow" <<'EOF'
+flow.link=x
+func.echo.exec=printf "%s" "<arg.msg>"
+node.x.msg=Function says "hello"
+node.x.exec=<func.echo x>
+EOF
 }
 
 # Run runtime behavior tests.
@@ -283,6 +295,11 @@ test_runtime() {
     rm -f "$TMP/branch-count"
     assert_output "12" "branch cache isolation failed" "$BIN" "$TMP/heredoc-branch-cache.flow"
     kc_test_pass "branch cache isolation"
+    quote_expected=$(printf '%s\n%s' "He said \"hi\" with \$HOME and \`ticks\`" "can't stop")
+    assert_output "$quote_expected" "quoted shell placeholder failed" "$BIN" "$TMP/quote.flow"
+    kc_test_pass "quoted shell placeholders"
+    assert_output 'Function says "hello"' "quoted function placeholder failed" "$BIN" "$TMP/quote-func.flow"
+    kc_test_pass "quoted function placeholders"
     assert_output "comment-ok" "full-line comments failed" "$BIN" "$TMP/comment.flow"
     kc_test_pass "full-line comments"
     assert_output "child-alt" "file overlay failed" "$BIN" "$TMP/overlay.flow" --set node.child.file=render-alt.flow --unset flow.link --set flow.link=child

@@ -45,6 +45,17 @@ typedef enum kc_flow_value_kind {
     KC_FLOW_VALUE_EXEC = 2
 } kc_flow_value_kind_t;
 
+typedef enum kc_flow_template_mode {
+    KC_FLOW_TEMPLATE_TEXT = 1,
+    KC_FLOW_TEMPLATE_SHELL = 2
+} kc_flow_template_mode_t;
+
+typedef enum kc_flow_quote_state {
+    KC_FLOW_QUOTE_NONE = 0,
+    KC_FLOW_QUOTE_SINGLE = 1,
+    KC_FLOW_QUOTE_DOUBLE = 2
+} kc_flow_quote_state_t;
+
 typedef struct kc_flow_record {
     char *key;
     char *value;
@@ -1169,6 +1180,65 @@ static int kc_flow_append_text(char **out, size_t *cap, size_t *len, const char 
     return KC_FLOW_OK;
 }
 
+/**
+ * Append one resolved shell value in the current quote state.
+ * @param out Output buffer pointer.
+ * @param cap Output capacity pointer.
+ * @param len Output length pointer.
+ * @param text Text to append.
+ * @param quote Current shell quote state.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
+ */
+static int kc_flow_append_shell_value(
+    char **out,
+    size_t *cap,
+    size_t *len,
+    const char *text,
+    kc_flow_quote_state_t quote
+) {
+    size_t i;
+
+    if (quote == KC_FLOW_QUOTE_NONE) {
+        return kc_flow_append_text(out, cap, len, text);
+    }
+    for (i = 0; text[i]; i++) {
+        char ch[2];
+        ch[0] = text[i];
+        ch[1] = '\0';
+        if (quote == KC_FLOW_QUOTE_SINGLE && text[i] == '\'') {
+            if (kc_flow_append_text(out, cap, len, "'\\''") != KC_FLOW_OK) return KC_FLOW_ERROR;
+        } else {
+            if (quote == KC_FLOW_QUOTE_DOUBLE && strchr("\"\\$`", text[i])) {
+                if (kc_flow_append_text(out, cap, len, "\\") != KC_FLOW_OK) return KC_FLOW_ERROR;
+            }
+            if (kc_flow_append_text(out, cap, len, ch) != KC_FLOW_OK) return KC_FLOW_ERROR;
+        }
+    }
+    return KC_FLOW_OK;
+}
+
+/**
+ * Updates shell quote state from one literal template character.
+ * @param quote Current shell quote state pointer.
+ * @param escaped Current escape state pointer.
+ * @param ch Literal character.
+ * @return None.
+ */
+static void kc_flow_shell_quote_step(kc_flow_quote_state_t *quote, int *escaped, char ch) {
+    if (*quote != KC_FLOW_QUOTE_SINGLE && ch == '\\' && !*escaped) {
+        *escaped = 1;
+        return;
+    }
+    if (ch == '\'' && *quote == KC_FLOW_QUOTE_NONE && !*escaped) {
+        *quote = KC_FLOW_QUOTE_SINGLE;
+    } else if (ch == '\'' && *quote == KC_FLOW_QUOTE_SINGLE) {
+        *quote = KC_FLOW_QUOTE_NONE;
+    } else if (ch == '"' && *quote != KC_FLOW_QUOTE_SINGLE && !*escaped) {
+        *quote = (*quote == KC_FLOW_QUOTE_DOUBLE) ? KC_FLOW_QUOTE_NONE : KC_FLOW_QUOTE_DOUBLE;
+    }
+    *escaped = 0;
+}
+
 static int kc_flow_run_command(
     const char *command,
     const char *flow_path,
@@ -1193,6 +1263,19 @@ static char *kc_flow_template(
     const kc_flow_store_t *node_data,
     kc_flow_store_t *cache,
     int depth
+);
+
+static char *kc_flow_template_mode(
+    kc_flow_t *ctx,
+    const char *flow_path,
+    const char *text,
+    kc_flow_model_t *model,
+    const kc_flow_store_t *flow,
+    const kc_flow_node_t *node,
+    const kc_flow_store_t *node_data,
+    kc_flow_store_t *cache,
+    int depth,
+    kc_flow_template_mode_t mode
 );
 
 static int kc_flow_collect_node_from(
@@ -1275,7 +1358,7 @@ static char *kc_flow_resolve_record(
     if (cached) {
         return kc_flow_dup(cached);
     }
-    command = kc_flow_template(
+    command = kc_flow_template_mode(
         ctx,
         flow_path,
         record->value,
@@ -1284,7 +1367,8 @@ static char *kc_flow_resolve_record(
         current,
         node_data,
         cache,
-        depth + 1
+        depth + 1,
+        KC_FLOW_TEMPLATE_SHELL
     );
     if (!command) {
         kc_flow_fail(ctx, "template expansion failed inside computed value");
@@ -1609,12 +1693,15 @@ static char *kc_flow_expand_arg_tags(
     const kc_flow_node_t *arg_node,
     const char *prefix,
     kc_flow_store_t *cache,
-    int depth
+    int depth,
+    kc_flow_template_mode_t mode
 ) {
     char *out;
     size_t cap;
     size_t len = 0;
     size_t i;
+    kc_flow_quote_state_t quote = KC_FLOW_QUOTE_NONE;
+    int escaped = 0;
 
     if (!text || depth > 64) {
         return NULL;
@@ -1671,7 +1758,12 @@ static char *kc_flow_expand_arg_tags(
                 free(out);
                 return NULL;
             }
-            if (kc_flow_append_text(&out, &cap, &len, value) != KC_FLOW_OK) {
+            if (mode == KC_FLOW_TEMPLATE_SHELL) {
+                if (kc_flow_append_shell_value(&out, &cap, &len, value, quote) != KC_FLOW_OK) {
+                    free(value);
+                    return NULL;
+                }
+            } else if (kc_flow_append_text(&out, &cap, &len, value) != KC_FLOW_OK) {
                 free(value);
                 return NULL;
             }
@@ -1681,6 +1773,9 @@ static char *kc_flow_expand_arg_tags(
             char ch[2];
             ch[0] = text[i];
             ch[1] = '\0';
+            if (mode == KC_FLOW_TEMPLATE_SHELL) {
+                kc_flow_shell_quote_step(&quote, &escaped, text[i]);
+            }
             if (kc_flow_append_text(&out, &cap, &len, ch) != KC_FLOW_OK) {
                 return NULL;
             }
@@ -1724,6 +1819,7 @@ static char *kc_flow_expand_call(
     kc_flow_store_t fn_data;
     char *with_args;
     char *expanded;
+    kc_flow_template_mode_t mode;
 
     if (depth > 64 || strncmp(name, "func.", 5) != 0) {
         return NULL;
@@ -1744,6 +1840,7 @@ static char *kc_flow_expand_call(
     if (!behavior || !behavior->exec) {
         return NULL;
     }
+    mode = KC_FLOW_TEMPLATE_SHELL;
 
     arg_node = kc_flow_call_arg_node(model, arg_ref, prefix, sizeof(prefix));
     if (!arg_node) {
@@ -1761,7 +1858,8 @@ static char *kc_flow_expand_call(
         arg_node,
         prefix,
         cache,
-        depth + 1
+        depth + 1,
+        mode
     );
     if (!with_args) {
         return NULL;
@@ -1784,7 +1882,7 @@ static char *kc_flow_expand_call(
         return NULL;
     }
 
-    expanded = kc_flow_template(
+    expanded = kc_flow_template_mode(
         ctx,
         flow_path,
         with_args,
@@ -1793,7 +1891,8 @@ static char *kc_flow_expand_call(
         fn_node,
         &fn_data,
         cache,
-        depth + 1
+        depth + 1,
+        mode
     );
     free(with_args);
     if (expanded && behavior->exec_kind == KC_FLOW_VALUE_EXEC) {
@@ -2008,10 +2107,49 @@ static char *kc_flow_template(
     kc_flow_store_t *cache,
     int depth
 ) {
+    return kc_flow_template_mode(
+        ctx,
+        flow_path,
+        text,
+        model,
+        flow,
+        node,
+        node_data,
+        cache,
+        depth,
+        KC_FLOW_TEMPLATE_TEXT
+    );
+}
+
+/**
+ * Resolve placeholders in one template.
+ * @param text Template text.
+ * @param model Parsed model.
+ * @param flow Effective flow data.
+ * @param node Current node.
+ * @param node_data Resolved current node data.
+ * @param depth Recursion guard.
+ * @param mode Template expansion mode.
+ * @return Resolved heap string or NULL.
+ */
+static char *kc_flow_template_mode(
+    kc_flow_t *ctx,
+    const char *flow_path,
+    const char *text,
+    kc_flow_model_t *model,
+    const kc_flow_store_t *flow,
+    const kc_flow_node_t *node,
+    const kc_flow_store_t *node_data,
+    kc_flow_store_t *cache,
+    int depth,
+    kc_flow_template_mode_t mode
+) {
     char *out;
     size_t cap;
     size_t len = 0;
     size_t i;
+    kc_flow_quote_state_t quote = KC_FLOW_QUOTE_NONE;
+    int escaped = 0;
 
     if (!text || depth > 64) {
         return NULL;
@@ -2081,7 +2219,12 @@ static char *kc_flow_template(
                 free(out);
                 return NULL;
             }
-            if (kc_flow_append_text(&out, &cap, &len, value) != KC_FLOW_OK) {
+            if (mode == KC_FLOW_TEMPLATE_SHELL) {
+                if (kc_flow_append_shell_value(&out, &cap, &len, value, quote) != KC_FLOW_OK) {
+                    free(value);
+                    return NULL;
+                }
+            } else if (kc_flow_append_text(&out, &cap, &len, value) != KC_FLOW_OK) {
                 free(value);
                 return NULL;
             }
@@ -2091,6 +2234,9 @@ static char *kc_flow_template(
             char ch[2];
             ch[0] = text[i];
             ch[1] = '\0';
+            if (mode == KC_FLOW_TEMPLATE_SHELL) {
+                kc_flow_shell_quote_step(&quote, &escaped, text[i]);
+            }
             if (kc_flow_append_text(&out, &cap, &len, ch) != KC_FLOW_OK) {
                 return NULL;
             }
@@ -2991,7 +3137,7 @@ static int kc_flow_run_node(
         kc_flow_branches_t next;
         kc_flow_branches_init(&next);
         for (i = 0; rc == KC_FLOW_OK && i < active.count; ++i) {
-            char *command = kc_flow_template(
+            char *command = kc_flow_template_mode(
                 ctx,
                 flow_path,
                 behavior->exec,
@@ -3000,7 +3146,8 @@ static int kc_flow_run_node(
                 node,
                 &node_data,
                 &cache,
-                0
+                0,
+                KC_FLOW_TEMPLATE_SHELL
             );
             char *out = NULL;
             size_t out_size = 0;
