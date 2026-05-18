@@ -297,14 +297,8 @@ make loongarch64/linux
 For rendering visual graph representations of `.flow` documents, you can check the
 [fldot](https://github.com/kaisarcode/fldot) conversion tool.
 
----
+## License
 
-**Author:** KaisarCode
+[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
 
-**Email:** <kaisar@kaisarcode.com>
-
-**Website:** [https://kaisarcode.com](https://kaisarcode.com)
-
-**License:** [GNU GPL v3.0](https://www.gnu.org/licenses/gpl-3.0.html)
-
-© 2026 KaisarCode
+This project is distributed under the **GNU General Public License version 3 (GPLv3)**. 
