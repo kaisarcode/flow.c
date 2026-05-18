@@ -21,7 +21,7 @@
 #include <unistd.h>
 #endif
 
-#define KC_FLOW_VERSION "0.1.0"
+#define KC_FLOW_VERSION "1.0.0"
 
 /**
  * Read standard input into memory.
