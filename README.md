@@ -262,7 +262,7 @@ architecture running the build.
 make clean && make
 ```
 
-## Multiarch Builds
+### Multiarch Builds
 
 The project is prepared to build artifacts for multiple architectures under
 `bin/{arch}/{platform}/`. A plain `make` builds only the current host
