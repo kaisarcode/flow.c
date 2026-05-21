@@ -85,7 +85,7 @@ all: \
 	s390x/linux \
 	loongarch64/linux
 
-## ── Linux ────────────────────────────────────────────────────────────────────
+## Linux
 
 define linux_target
 	@mkdir -p $(BIN_DIR)/$(1)/linux
@@ -138,7 +138,7 @@ s390x/linux:
 loongarch64/linux:
 	$(call linux_target,loongarch64,loongarch64-linux-gnu-gcc)
 
-## ── Windows ──────────────────────────────────────────────────────────────────
+## Windows
 
 define windows_target
 	@mkdir -p $(BIN_DIR)/$(1)/windows
@@ -162,7 +162,7 @@ x86_64/windows:
 i686/windows:
 	$(call windows_target,i686,i686-w64-mingw32-gcc)
 
-## ── Android ──────────────────────────────────────────────────────────────────
+## Android
 
 define android_target
 	@mkdir -p $(BIN_DIR)/$(1)/android
@@ -186,7 +186,7 @@ aarch64/android:
 armv7/android:
 	$(call android_target,armv7,armeabi-v7a)
 
-## ── Utility ──────────────────────────────────────────────────────────────────
+## Utility
 
 test:
 	@sh test.sh
