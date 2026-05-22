@@ -14,7 +14,7 @@ independent and do not merge.
 
 The `flow` command executes one workflow file, accepts optional input from
 standard input, and prints the produced branch output to standard output.
-Runtime overlays can replace entries, parameters, child files, and commands
+Runtime overlays can replace entries, parameters, child imports, and commands
 without editing the source file.
 
 ### Examples
@@ -78,7 +78,7 @@ EOF
 Each route uses a shared child-flow behavior:
 
 ```flow
-node.page.file=page.flow
+node.page.import=page.flow
 node.page.site=<flow.site>
 
 node.home.use=page

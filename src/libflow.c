@@ -75,8 +75,8 @@ typedef struct kc_flow_links {
 typedef struct kc_flow_node {
     char *ref;
     char *use;
-    char *file;
-    kc_flow_value_kind_t file_kind;
+    char *import;
+    kc_flow_value_kind_t import_kind;
     char *exec;
     kc_flow_value_kind_t exec_kind;
     kc_flow_store_t data;
@@ -707,7 +707,7 @@ static void kc_flow_model_free(kc_flow_model_t *model) {
     for (i = 0; i < model->node_count; ++i) {
         free(model->nodes[i].ref);
         free(model->nodes[i].use);
-        free(model->nodes[i].file);
+        free(model->nodes[i].import);
         free(model->nodes[i].exec);
         kc_flow_store_free(&model->nodes[i].data);
         kc_flow_links_free(&model->nodes[i].links);
@@ -715,7 +715,7 @@ static void kc_flow_model_free(kc_flow_model_t *model) {
     for (i = 0; i < model->func_count; ++i) {
         free(model->funcs[i].ref);
         free(model->funcs[i].use);
-        free(model->funcs[i].file);
+        free(model->funcs[i].import);
         free(model->funcs[i].exec);
         kc_flow_store_free(&model->funcs[i].data);
         kc_flow_links_free(&model->funcs[i].links);
@@ -875,14 +875,14 @@ static int kc_flow_parse_node(
         node->use = next;
         return KC_FLOW_OK;
     }
-    if (strcmp(field, "file") == 0) {
+    if (strcmp(field, "import") == 0) {
         char *next = kc_flow_dup(value);
         if (!next) {
             return KC_FLOW_ERROR;
         }
-        free(node->file);
-        node->file = next;
-        node->file_kind = kind;
+        free(node->import);
+        node->import = next;
+        node->import_kind = kind;
         return KC_FLOW_OK;
     }
     if (strcmp(field, "exec") == 0) {
@@ -944,14 +944,14 @@ static int kc_flow_parse_func(
         func->use = next;
         return KC_FLOW_OK;
     }
-    if (strcmp(field, "file") == 0) {
+    if (strcmp(field, "import") == 0) {
         char *next = kc_flow_dup(value);
         if (!next) {
             return KC_FLOW_ERROR;
         }
-        free(func->file);
-        func->file = next;
-        func->file_kind = kind;
+        free(func->import);
+        func->import = next;
+        func->import_kind = kind;
         return KC_FLOW_OK;
     }
     if (strcmp(field, "exec") == 0) {
@@ -1449,10 +1449,10 @@ static char *kc_flow_resolve_node_value(
         return NULL;
     }
 
-    if (strcmp(key, "file") == 0 && target->file) {
+    if (strcmp(key, "import") == 0 && target->import) {
         special.key = (char *)key;
-        special.value = target->file;
-        special.kind = target->file_kind ? target->file_kind : KC_FLOW_VALUE_LITERAL;
+        special.value = target->import;
+        special.kind = target->import_kind ? target->import_kind : KC_FLOW_VALUE_LITERAL;
         return kc_flow_resolve_record(
             ctx,
             flow_path,
@@ -3095,16 +3095,16 @@ static int kc_flow_run_node(
         kc_flow_store_free(&cache);
         return kc_flow_fail(ctx, "unable to create branch");
     }
-    if (behavior->file && *behavior->file) {
+    if (behavior->import && *behavior->import) {
         kc_flow_branches_t next;
         kc_flow_record_t record;
-        char *file;
+        char *import;
         char child_path[KC_FLOW_MAX_PATH];
 
-        record.key = (char *)"file";
-        record.value = behavior->file;
-        record.kind = behavior->file_kind ? behavior->file_kind : KC_FLOW_VALUE_LITERAL;
-        file = kc_flow_resolve_record(
+        record.key = (char *)"import";
+        record.value = behavior->import;
+        record.kind = behavior->import_kind ? behavior->import_kind : KC_FLOW_VALUE_LITERAL;
+        import = kc_flow_resolve_record(
             ctx,
             flow_path,
             model,
@@ -3112,21 +3112,21 @@ static int kc_flow_run_node(
             node,
             &node_data,
             &cache,
-            "node.file",
+            "node.import",
             &record,
             NULL,
             0,
             0
         );
         kc_flow_branches_init(&next);
-        if (!file || kc_flow_relative_path(child_path, sizeof(child_path), flow_path, file) != KC_FLOW_OK) {
-            free(file);
+        if (!import || kc_flow_relative_path(child_path, sizeof(child_path), flow_path, import) != KC_FLOW_OK) {
+            free(import);
             kc_flow_branches_free(&active);
             kc_flow_store_free(&node_data);
             kc_flow_store_free(&cache);
             return kc_flow_fail(ctx, "invalid child flow path");
         }
-        free(file);
+        free(import);
         for (i = 0; rc == KC_FLOW_OK && i < active.count; ++i) {
             rc = kc_flow_run_child(ctx, child_path, &node_data, &active.items[i], &next, depth + 1);
         }

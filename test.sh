@@ -83,7 +83,7 @@ flow.owner=team
 node.default.exec=printf "%s" "default"
 node.server.exec=printf "%s" "<node.param.msg>"
 node.install.exec=printf "%s" "install"
-node.child.file=render-default.flow
+node.child.import=render-default.flow
 node.left.exec=printf "%s" "left"
 node.right.exec=printf "%s" "right"
 node.meta.foo=bar
@@ -110,7 +110,7 @@ EOF
     } > "$TMP/comment.flow"
     cat > "$TMP/file-exec.flow" <<'EOF'
 flow.link=root
-node.root.file=render-default.flow
+node.root.import=render-default.flow
 node.root.exec=sed 's/default/exec/'
 EOF
     cat > "$TMP/cycle.flow" <<'EOF'
@@ -302,7 +302,7 @@ test_runtime() {
     kc_test_pass "quoted function placeholders"
     assert_output "comment-ok" "full-line comments failed" "$BIN" "$TMP/comment.flow"
     kc_test_pass "full-line comments"
-    assert_output "child-alt" "file overlay failed" "$BIN" "$TMP/overlay.flow" --set node.child.file=render-alt.flow --unset flow.link --set flow.link=child
+    assert_output "child-alt" "import overlay failed" "$BIN" "$TMP/overlay.flow" --set node.child.import=render-alt.flow --unset flow.link --set flow.link=child
     kc_test_pass "file overlay"
     assert_output "install" "--unset behavior failed" "$BIN" "$TMP/overlay.flow" --unset flow.link --set flow.link=install
     kc_test_pass "--unset behavior"

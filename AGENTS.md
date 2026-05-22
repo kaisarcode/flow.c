@@ -97,7 +97,7 @@ Read → Model → Execute
 | `flow.link` | flow | Entry node reference (can repeat for multiple entries) |
 | `flow.*` | flow | Arbitrary global data keys |
 | `node.{ref}.exec` | node | Shell command to run when node fires |
-| `node.{ref}.file` | node | Child flow file to expand first |
+| `node.{ref}.import` | node | Import a child flow to execute in place |
 | `node.{ref}.use` | node | Inherit exec/file/data from another node |
 | `node.{ref}.link` | node | Downstream node(s) to trigger (can repeat) |
 | `node.{ref}.meta.*` | node | Convention: metadata (no runtime behaviour) |
@@ -165,7 +165,7 @@ For each node in the execution trace:
 a. **Resolve behavior** via `use` chain (recursive, max depth 64)
 b. **Collect node data** — walk `use` chain, resolve all data records (template-expand each, memoized)
 c. **Copy input branch** — each incoming branch is the node's stdin
-d. **If `file`** — resolve path relative to flow file, run child flow, replace active branches with child output
+d. **If `import`** — resolve path relative to flow file, run child flow, replace active branches with child output
 e. **If `exec`** — template-expand the command (shell mode), run via shell/builtin, replace active branches with command output
 f. **If `links`** — for each active branch × each link:
     - Resolve link value (template-expand, possibly heredoc-exec)
@@ -447,7 +447,7 @@ Errors propagate up the call chain. The context stores one error string:
 | `invalid node reference` | Entry/link target doesn't exist |
 | `unknown entry` | `--entry` target doesn't exist |
 | `unable to resolve node data` | Template expansion failure in data collection |
-| `invalid child flow path` | `node.file` resolves to invalid path |
+| `invalid child flow path` | `node.import` resolves to invalid path |
 | `child flow execution failed` | Error in child flow expansion |
 | `computed link target not found` | Heredoc link resolved to a node that doesn't exist |
 | `computed link resolved to empty target` | Heredoc link produced empty string |

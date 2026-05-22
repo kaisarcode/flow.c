@@ -7,7 +7,7 @@ func.status.exec=<<EOF
 printf "%s %s" "<arg.code>" "<arg.label>"
 EOF
 
-node.page.file=page.flow
+node.page.import=page.flow
 node.page.site=<flow.site>
 
 node.request.link=<<EOF
