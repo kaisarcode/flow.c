@@ -157,7 +157,7 @@ A heredoc on `node.exec` runs as the node action; on `node.link` it computes the
 - For each entry in `flow.link`:
     - Resolve (template-expand) the link value
     - Look up target node
-    - If no entries exist (with `--entry`), use the explicit entry
+    - If no entries exist (with `--link`), use the explicit entry
 
 ### 3. Run Node (`kc_flow_run_node`)
 For each node in the execution trace:
@@ -325,7 +325,7 @@ flow file.flow [options]
 
 | Flag | Description |
 |------|-------------|
-| `--entry <name>` | Execute one explicit entry node |
+| `--link <name>` | Execute one explicit entry node |
 | `--set key=value` | Append one overlay record |
 | `--unset <key>` | Remove prior records for one exact key |
 | `--workers <n>` | Set worker count hint |
@@ -445,7 +445,7 @@ Errors propagate up the call chain. The context stores one error string:
 | `invalid flow structure` | Cycle detected or unknown node reference in link |
 | `invalid structural key` | `--set`/`--unset` key fails validation |
 | `invalid node reference` | Entry/link target doesn't exist |
-| `unknown entry` | `--entry` target doesn't exist |
+| `unknown entry` | `--link` target doesn't exist |
 | `unable to resolve node data` | Template expansion failure in data collection |
 | `invalid child flow path` | `node.import` resolves to invalid path |
 | `child flow execution failed` | Error in child flow expansion |

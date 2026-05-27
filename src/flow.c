@@ -131,7 +131,7 @@ static void kc_flow_cli_help(const char *name) {
     printf("Usage: %s file.flow [options]\n", name);
     printf("\n");
     printf("Options:\n");
-    printf("    --entry <name>     Execute one explicit entry node\n");
+    printf("    --link <name>      Execute one explicit entry node\n");
     printf("    --set key=value    Append one overlay record\n");
     printf("    --unset <key>      Remove prior records for one key\n");
     printf("    --workers <n>      Set worker count hint\n");
@@ -193,10 +193,10 @@ int main(int argc, char **argv) {
             kc_flow_close(ctx);
             return 0;
         }
-        if (strcmp(argv[i], "--entry") == 0) {
+        if (strcmp(argv[i], "--link") == 0) {
             if (++i >= argc) {
                 kc_flow_close(ctx);
-                return kc_flow_cli_fail("missing value for --entry");
+                return kc_flow_cli_fail("missing value for --link");
             }
             entry = argv[i];
         } else if (strcmp(argv[i], "--set") == 0) {

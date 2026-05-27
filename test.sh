@@ -1,10 +1,9 @@
 #!/bin/bash
-# test.sh - flow.c functional validation.
-# Summary: Validates the public CLI and C API for the flow runtime.
-#
+# test.sh
+# Summary: Validation suite for flow CLI and C API runtime behavior.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
-# License: GNU GPL v3.0
+# License: https://www.gnu.org/licenses/gpl-3.0.html
 
 set -e
 
@@ -233,7 +232,7 @@ test_runtime() {
     kc_test_pass "optional flow.id"
     assert_output "" "optional flow link failed" "$BIN" "$TMP/overlay.flow" --unset flow.link
     kc_test_pass "optional flow.link"
-    assert_output "" "metadata-only node failed" "$BIN" "$TMP/overlay.flow" --entry meta
+    assert_output "" "metadata-only node failed" "$BIN" "$TMP/overlay.flow" --link meta
     kc_test_pass "metadata-only nodes"
     site_expected=$(printf '# Tiny Flow Site / Home\nstatus: 200 OK\nslug: home\n\nWelcome to the tiny flow site.\n\n-- words: 17\n\n-- checksum: 902964706')
     assert_output "$site_expected" "site home route failed" "$BIN" "$ROOT/etc/site.flow" --set flow.path=/

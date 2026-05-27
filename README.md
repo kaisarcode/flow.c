@@ -28,7 +28,7 @@ Execute one flow file:
 Execute one explicit entry:
 
 ```bash
-./bin/x86_64/linux/flow file.flow --entry build
+./bin/x86_64/linux/flow file.flow --link build
 ```
 
 Pipe input through standard input:
@@ -213,7 +213,7 @@ Run the included cohesive examples:
 | Command/Flag | Description |
 | :--- | :--- |
 | `file.flow` | Execute one flow file |
-| `--entry <name>` | Execute one explicit entry node |
+| `--link <name>` | Execute one explicit entry node |
 | `--set key=value` | Append one overlay record |
 | `--unset <key>` | Remove prior records for one exact key |
 | `--workers <n>` | Set a positive worker count hint |
