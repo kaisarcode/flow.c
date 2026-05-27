@@ -6,6 +6,8 @@
 
 Real-world: runs [kaisarcode.com](https://kaisarcode.com) — a 981-line Flow DAG that listens via `netl`, parses HTTP through `http`, routes requests, serves static assets, renders Markdown pages through `mdp` + `tpl`, generates RSS, and handles search — all composed in shell pipelines without a single line of application C code.
 
+For the complete official reference covering every feature, format detail, execution model, and usage pattern, read **`etc/docs/guide.md`** first.
+
 ---
 
 ## Architecture: Three Phases
@@ -29,6 +31,7 @@ Read → Model → Execute
 | `src/flow.h` | Public C API (121 lines) |
 | `etc/site.flow` | Example: tiny static-site request pipeline |
 | `etc/page.flow` | Example: reusable page renderer child flow |
+| `etc/docs/guide.md` | Official reference: complete coverage of format, CLI, execution, templates, functions, heredocs, overlays, C API, and patterns |
 | `Makefile` | Cross-compilation builder (17 targets, CMake + Ninja) |
 | `CMakeLists.txt` | CMake project: static lib + shared lib + CLI |
 | `test.sh` | 28 tests: CLI, runtime, C API |
