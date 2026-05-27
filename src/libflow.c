@@ -112,7 +112,6 @@ typedef struct kc_flow_branches {
 struct kc_flow {
     kc_flow_overlay_t overlays[KC_FLOW_MAX_RECORDS];
     size_t overlay_count;
-    size_t workers;
     char error[KC_FLOW_ERROR_SIZE];
 };
 
@@ -3394,9 +3393,6 @@ static int kc_flow_exec_loaded(
 kc_flow_t *kc_flow_open(void) {
     kc_flow_t *ctx = (kc_flow_t *)calloc(1, sizeof(kc_flow_t));
 
-    if (ctx) {
-        ctx->workers = 1;
-    }
     return ctx;
 }
 
@@ -3463,20 +3459,6 @@ int kc_flow_unset(kc_flow_t *ctx, const char *key) {
         return kc_flow_fail(ctx, "out of memory");
     }
     ctx->overlay_count++;
-    return KC_FLOW_OK;
-}
-
-/**
- * Set the runtime worker count hint.
- * @param ctx Context pointer.
- * @param workers Worker count greater than zero.
- * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
- */
-int kc_flow_set_workers(kc_flow_t *ctx, size_t workers) {
-    if (!ctx || workers == 0) {
-        return kc_flow_fail(ctx, "invalid worker count");
-    }
-    ctx->workers = workers;
     return KC_FLOW_OK;
 }
 

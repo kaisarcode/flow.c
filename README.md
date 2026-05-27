@@ -216,7 +216,7 @@ Run the included cohesive examples:
 | `--link <name>` | Execute one explicit entry node |
 | `--set key=value` | Append one overlay record |
 | `--unset <key>` | Remove prior records for one exact key |
-| `--workers <n>` | Set a positive worker count hint |
+
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
@@ -245,7 +245,7 @@ kc_flow_close(ctx);
 - `kc_flow_open()` - allocates and returns a new context owned by the caller.
 - `kc_flow_set()` - appends one ordered set overlay.
 - `kc_flow_unset()` - appends one ordered unset overlay.
-- `kc_flow_set_workers()` - validates and stores a worker count hint.
+
 - `kc_flow_exec()` - executes a flow file from its declared entries.
 - `kc_flow_exec_entry()` - executes a flow file from one explicit entry node.
 - `kc_flow_free()` - releases output data owned by the library.

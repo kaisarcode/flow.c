@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v2.0.0
+
+- Removed `--workers` CLI flag and `kc_flow_set_workers()` API. Execution is and will remain sequential; the hint was never functional and added surface area.
+
 ## v1.1.1
 
 - Renamed `--entry` CLI flag to `--link`.

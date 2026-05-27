@@ -53,8 +53,6 @@ test_cli() {
     kc_test_pass "help output"
     "$BIN" --unknown >/dev/null 2>&1 && kc_test_fail "unknown flag should fail"
     kc_test_pass "unknown flag failure"
-    "$BIN" --workers 0 "$ROOT/etc/site.flow" >/dev/null 2>&1 && kc_test_fail "invalid workers should fail"
-    kc_test_pass "invalid workers failure"
     "$BIN" >/dev/null 2>&1 && kc_test_fail "missing flow file should fail"
     kc_test_pass "missing flow file failure"
 }

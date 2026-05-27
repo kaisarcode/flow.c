@@ -47,7 +47,7 @@ Read → Model → Execute
 
 | Symbol | Type | Role |
 |--------|------|------|
-| `kc_flow_t` | struct | Context: overlays array, worker hint, error buffer |
+| `kc_flow_t` | struct | Context: overlays array, error buffer |
 | `kc_flow_model_t` | struct | Parsed flow: id, flow data store, entries links, nodes[], funcs[] |
 | `kc_flow_node_t` | struct | One node/func: ref, use, file, exec, data store, links |
 | `kc_flow_record_t` | struct | One key-value pair with value kind (literal or exec) |
@@ -307,7 +307,7 @@ kc_flow_close(ctx);
 | `kc_flow_open()` | Allocate context |
 | `kc_flow_set(ctx, key, val)` | Append `--set` overlay |
 | `kc_flow_unset(ctx, key)` | Append `--unset` overlay |
-| `kc_flow_set_workers(ctx, n)` | Worker hint (stored but no parallel execution yet) |
+
 | `kc_flow_exec(ctx, path, input, input_size, &out, &out_size)` | Execute from flow entries |
 | `kc_flow_exec_entry(ctx, path, entry, input, input_size, &out, &out_size)` | Execute from one entry |
 | `kc_flow_free(ptr)` | Free output buffer |
@@ -331,7 +331,7 @@ flow file.flow [options]
 | `--link <name>` | Execute one explicit entry node |
 | `--set key=value` | Append one overlay record |
 | `--unset <key>` | Remove prior records for one exact key |
-| `--workers <n>` | Set worker count hint |
+
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version (0.1.0) |
 
@@ -468,7 +468,7 @@ Errors propagate up the call chain. The context stores one error string:
 
 ## Constraints
 
-- No parallel execution (workers hint stored, sequential execution only)
+- Sequential execution only
 - No branch merging (all leaf output concatenated)
 - Single flow file per invocation (child flows load separate files)
 - Functions cannot contain nested function calls in arg position (`<func.a <func.b x>>` not supported)

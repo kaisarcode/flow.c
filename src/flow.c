@@ -21,7 +21,7 @@
 #include <unistd.h>
 #endif
 
-#define KC_FLOW_VERSION "1.1.1"
+#define KC_FLOW_VERSION "2.0.0"
 
 /**
  * Read standard input into memory.
@@ -96,33 +96,6 @@ static int kc_flow_cli_read_input(char **output, size_t *output_size) {
 }
 
 /**
- * Parse one strict positive integer.
- * @param text Source text.
- * @param value Output value pointer.
- * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
- */
-static int kc_flow_cli_parse_workers(const char *text, size_t *value) {
-    size_t out = 0;
-    const char *cursor = text;
-
-    if (!text || !*text) {
-        return KC_FLOW_ERROR;
-    }
-    while (*cursor) {
-        if (*cursor < '0' || *cursor > '9') {
-            return KC_FLOW_ERROR;
-        }
-        out = out * 10 + (size_t)(*cursor - '0');
-        cursor++;
-    }
-    if (out == 0) {
-        return KC_FLOW_ERROR;
-    }
-    *value = out;
-    return KC_FLOW_OK;
-}
-
-/**
  * Print command help.
  * @param name Program name.
  * @return None.
@@ -134,7 +107,7 @@ static void kc_flow_cli_help(const char *name) {
     printf("    --link <name>      Execute one explicit entry node\n");
     printf("    --set key=value    Append one overlay record\n");
     printf("    --unset <key>      Remove prior records for one key\n");
-    printf("    --workers <n>      Set worker count hint\n");
+
     printf("    -h, --help         Show this help message\n");
     printf("    -v, --version      Show version\n");
 }
@@ -231,12 +204,6 @@ int main(int argc, char **argv) {
             if (kc_flow_unset(ctx, argv[i]) != KC_FLOW_OK) {
                 kc_flow_close(ctx);
                 return kc_flow_cli_fail("invalid --unset overlay");
-            }
-        } else if (strcmp(argv[i], "--workers") == 0) {
-            size_t workers;
-            if (++i >= argc || kc_flow_cli_parse_workers(argv[i], &workers) != KC_FLOW_OK || kc_flow_set_workers(ctx, workers) != KC_FLOW_OK) {
-                kc_flow_close(ctx);
-                return kc_flow_cli_fail("invalid worker count");
             }
         } else if (argv[i][0] == '-') {
             kc_flow_close(ctx);

@@ -53,14 +53,6 @@ int kc_flow_set(kc_flow_t *ctx, const char *key, const char *value);
 int kc_flow_unset(kc_flow_t *ctx, const char *key);
 
 /**
- * Set the runtime worker count hint.
- * @param ctx Context pointer.
- * @param workers Worker count greater than zero.
- * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
- */
-int kc_flow_set_workers(kc_flow_t *ctx, size_t workers);
-
-/**
  * Execute one flow file from its declared entries.
  * @param ctx Context pointer.
  * @param path Flow file path.

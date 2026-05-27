@@ -153,7 +153,7 @@ stdout. Diagnostics go to stderr.
 | `--link <name>` | Execute one explicit entry node |
 | `--set key=value` | Append one overlay record |
 | `--unset <key>` | Remove prior records for one key |
-| `--workers <n>` | Worker count hint (stored but unused - sequential only) |
+
 | `-h`, `--help` | Show help |
 | `-v`, `--version` | Show version |
 
@@ -560,7 +560,6 @@ kc_flow_t *ctx = kc_flow_open();
 // Configure overlays
 kc_flow_set(ctx, "flow.key", "value");
 kc_flow_unset(ctx, "flow.key");
-kc_flow_set_workers(ctx, 4);
 
 // Execute from flow entries
 char *out = NULL;
@@ -585,7 +584,7 @@ kc_flow_close(ctx);
 | `kc_flow_open()` | `kc_flow_t *` | Allocate new context |
 | `kc_flow_set(ctx, key, val)` | `int` | Append `--set` overlay |
 | `kc_flow_unset(ctx, key)` | `int` | Append `--unset` overlay |
-| `kc_flow_set_workers(ctx, n)` | `int` | Worker count hint |
+
 | `kc_flow_exec(ctx, path, in, in_size, &out, &out_size)` | `int` | Execute from flow entries |
 | `kc_flow_exec_entry(ctx, path, entry, in, in_size, &out, &out_size)` | `int` | Execute from one entry |
 | `kc_flow_free(ptr)` | `void` | Free output buffer |
@@ -786,7 +785,7 @@ No block comments, no inline comments after keys.
 
 ## Constraints
 
-- **No parallel execution** - workers hint is stored but execution is sequential
+- **Sequential execution only** - no parallel execution
 - **No branch merging** - all leaf output is simply concatenated
 - **Single flow file per invocation** - child flows load separate files
 - **No nested function calls in function-arg position** - `<func.a <func.b x>>` is not supported
