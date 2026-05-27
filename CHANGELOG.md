@@ -1,0 +1,23 @@
+# CHANGELOG
+
+## v1.1.1
+
+- Renamed `--entry` CLI flag to `--link`.
+
+## v1.1.0
+
+- Renamed reserved key `node.{ref}.file` to `node.{ref}.import`.
+- Bumped version to 1.1.0.
+- Added beta notice and contact info to README.
+
+## v1.0.0
+
+- Published the stable baseline release.
+- Provided flat dotted-document workflow execution with shell-pipe branches.
+- Supported node definitions with `exec`, `use`, `import`, and `link` fields.
+- Supported function definitions with `<func.name arg>` call syntax and template expansion.
+- Supported computed links via heredoc on `node.link`.
+- Supported shell-aware template expansion with quote-state tracking (single, double, backslash).
+- Supported builtin commands (`echo`, `cat`, `mkdir`) and fork+exec with environment variable exports.
+- Supported overlay records via CLI flags (`--set`, `--unset`, `--entry`).
+- Supported cross-platform builds (POSIX fork+exec, Windows `_popen`).
