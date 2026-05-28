@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v2.0.1
+
+- Resolved structural capture bug in `_WIN32` branch by replacing `_popen()` with native `CreateProcessA` standard handles to ensure correct `stdin` data propagation.
+- Resolved CLI lockup bug on Windows by adding `_isatty()` check.
+
 ## v2.0.0
 
 - Removed `--workers` CLI flag and `kc_flow_set_workers()` API. Execution is and will remain sequential; the hint was never functional and added surface area.

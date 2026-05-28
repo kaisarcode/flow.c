@@ -26,6 +26,7 @@
 #include <unistd.h>
 #else
 #include <windows.h>
+#include <io.h>
 #endif
 
 #define KC_FLOW_MAX_RECORDS 2048
@@ -2867,34 +2868,61 @@ capture:
             }
             goto capture;
         }
+        kc_flow_free_argv(argv);
     }
-    kc_flow_free_argv(argv);
-    fclose(in);
-
     {
-        FILE *pipe = _popen(command, "r");
-        if (!pipe) {
+        HANDLE hIn = (HANDLE)_get_osfhandle(_fileno(in));
+        HANDLE hOut = (HANDLE)_get_osfhandle(_fileno(out));
+        STARTUPINFOA si;
+        PROCESS_INFORMATION pi;
+        char *cmdline;
+        size_t cmd_len;
+        DWORD exit_code;
+
+        SetHandleInformation(hIn, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+        SetHandleInformation(hOut, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+
+        ZeroMemory(&si, sizeof(si));
+        si.cb = sizeof(si);
+        si.dwFlags |= STARTF_USESTDHANDLES;
+        si.hStdInput = hIn;
+        si.hStdOutput = hOut;
+        si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+
+        ZeroMemory(&pi, sizeof(pi));
+
+        cmd_len = strlen(command) + 16;
+        cmdline = (char *)malloc(cmd_len);
+        if (!cmdline) {
+            fclose(in);
             fclose(out);
             return KC_FLOW_ERROR;
         }
-        while (!feof(pipe)) {
-            size_t n = fread(chunk, 1, sizeof(chunk), pipe);
-            if (n > 0) {
-                fwrite(chunk, 1, n, out);
-            }
+        snprintf(cmdline, cmd_len, "cmd.exe /c \"%s\"", command);
+
+        if (!CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, 0, NULL, dir, &si, &pi)) {
+            free(cmdline);
+            fclose(in);
+            fclose(out);
+            return KC_FLOW_ERROR;
         }
-        {
-            int st = _pclose(pipe);
-            if (st != 0 && !ignore_error) {
-                fclose(out);
-                return KC_FLOW_ERROR;
-            }
+        free(cmdline);
+
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        GetExitCodeProcess(pi.hProcess, &exit_code);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+
+        if (exit_code != 0 && !ignore_error) {
+            fclose(in);
+            fclose(out);
+            return KC_FLOW_ERROR;
         }
     }
 capture:
     fflush(out);
     rewind(out);
-    while (!feof(out)) {
+    while (1) {
         size_t n = fread(chunk, 1, sizeof(chunk), out);
         if (n > 0) {
             if (total + n + 1 > cap) {
@@ -2911,6 +2939,14 @@ capture:
             }
             memcpy(data + total, chunk, n);
             total += n;
+        }
+        if (n < sizeof(chunk)) {
+            if (ferror(out)) {
+                free(data);
+                fclose(out);
+                return KC_FLOW_ERROR;
+            }
+            break;
         }
     }
     fclose(out);

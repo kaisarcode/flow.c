@@ -19,9 +19,11 @@
 
 #ifndef _WIN32
 #include <unistd.h>
+#else
+#include <io.h>
 #endif
 
-#define KC_FLOW_VERSION "2.0.0"
+#define KC_FLOW_VERSION "2.0.1"
 
 /**
  * Read standard input into memory.
@@ -78,6 +80,9 @@ static int kc_flow_cli_read_stdin(char **output, size_t *output_size) {
 static int kc_flow_cli_read_input(char **output, size_t *output_size) {
 #ifndef _WIN32
     if (isatty(fileno(stdin))) {
+#else
+    if (_isatty(_fileno(stdin))) {
+#endif
         char *empty;
 
         empty = (char *)malloc(1U);
@@ -90,7 +95,6 @@ static int kc_flow_cli_read_input(char **output, size_t *output_size) {
         *output_size = 0U;
         return KC_FLOW_OK;
     }
-#endif
 
     return kc_flow_cli_read_stdin(output, output_size);
 }
