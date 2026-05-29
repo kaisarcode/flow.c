@@ -23,7 +23,7 @@
 #include <io.h>
 #endif
 
-#define KC_FLOW_VERSION "2.0.1"
+#define KC_FLOW_VERSION "2.1.0"
 
 /**
  * Read standard input into memory.
@@ -141,6 +141,7 @@ static int kc_flow_cli_fail(const char *message) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
+    kc_flow_options_t opts = kc_flow_options_default();
     kc_flow_t *ctx;
     const char *run_path = NULL;
     const char *entry = NULL;
@@ -151,28 +152,40 @@ int main(int argc, char **argv) {
     int i;
     int rc;
 
+    kc_flow_options_load_env(&opts);
+
     if (argc == 1) {
         kc_flow_cli_help(argv[0]);
+        kc_flow_options_free(&opts);
         return 1;
     }
-    ctx = kc_flow_open();
-    if (!ctx) {
+    if (kc_flow_open(&ctx, &opts) != KC_FLOW_OK) {
+        kc_flow_options_free(&opts);
         return kc_flow_cli_fail("out of memory");
     }
+
+    kc_flow_listen_signals(ctx);
+#ifndef _WIN32
+    kc_flow_listen_signal(ctx, 2);
+    kc_flow_listen_signal(ctx, 15);
+#endif
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             kc_flow_cli_help(argv[0]);
             kc_flow_close(ctx);
+            kc_flow_options_free(&opts);
             return 0;
         }
         if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             kc_flow_cli_version();
             kc_flow_close(ctx);
+            kc_flow_options_free(&opts);
             return 0;
         }
         if (strcmp(argv[i], "--link") == 0) {
             if (++i >= argc) {
                 kc_flow_close(ctx);
+                kc_flow_options_free(&opts);
                 return kc_flow_cli_fail("missing value for --link");
             }
             entry = argv[i];
@@ -182,49 +195,59 @@ int main(int argc, char **argv) {
             size_t key_size;
             if (++i >= argc) {
                 kc_flow_close(ctx);
+                kc_flow_options_free(&opts);
                 return kc_flow_cli_fail("missing value for --set");
             }
             eq = strchr(argv[i], '=');
             if (!eq || eq == argv[i]) {
                 kc_flow_close(ctx);
+                kc_flow_options_free(&opts);
                 return kc_flow_cli_fail("invalid --set value");
             }
             key_size = (size_t)(eq - argv[i]);
             if (key_size >= sizeof(key)) {
                 kc_flow_close(ctx);
+                kc_flow_options_free(&opts);
                 return kc_flow_cli_fail("overlay key too long");
             }
             memcpy(key, argv[i], key_size);
             key[key_size] = '\0';
             if (kc_flow_set(ctx, key, eq + 1) != KC_FLOW_OK) {
                 kc_flow_close(ctx);
+                kc_flow_options_free(&opts);
                 return kc_flow_cli_fail("invalid --set overlay");
             }
         } else if (strcmp(argv[i], "--unset") == 0) {
             if (++i >= argc) {
                 kc_flow_close(ctx);
+                kc_flow_options_free(&opts);
                 return kc_flow_cli_fail("missing value for --unset");
             }
             if (kc_flow_unset(ctx, argv[i]) != KC_FLOW_OK) {
                 kc_flow_close(ctx);
+                kc_flow_options_free(&opts);
                 return kc_flow_cli_fail("invalid --unset overlay");
             }
         } else if (argv[i][0] == '-') {
             kc_flow_close(ctx);
+            kc_flow_options_free(&opts);
             return kc_flow_cli_fail("unknown option");
         } else if (run_path == NULL) {
             run_path = argv[i];
         } else {
             kc_flow_close(ctx);
+            kc_flow_options_free(&opts);
             return kc_flow_cli_fail("unexpected positional argument");
         }
     }
     if (!run_path) {
         kc_flow_close(ctx);
+        kc_flow_options_free(&opts);
         return kc_flow_cli_fail("missing flow file");
     }
     if (kc_flow_cli_read_input(&input, &input_size) != KC_FLOW_OK) {
         kc_flow_close(ctx);
+        kc_flow_options_free(&opts);
         return kc_flow_cli_fail("unable to read stdin");
     }
     rc = entry ? kc_flow_exec_entry(ctx, run_path, entry, input, input_size, &output, &output_size) : kc_flow_exec(ctx, run_path, input, input_size, &output, &output_size);
@@ -232,14 +255,17 @@ int main(int argc, char **argv) {
     if (rc != KC_FLOW_OK) {
         fprintf(stderr, "flow: %s\n", kc_flow_strerror(ctx));
         kc_flow_close(ctx);
+        kc_flow_options_free(&opts);
         return 1;
     }
     if (output_size > 0 && fwrite(output, 1, output_size, stdout) != output_size) {
         kc_flow_free(output);
         kc_flow_close(ctx);
+        kc_flow_options_free(&opts);
         return kc_flow_cli_fail("unable to write stdout");
     }
     kc_flow_free(output);
     kc_flow_close(ctx);
+    kc_flow_options_free(&opts);
     return 0;
 }

@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v2.1.0
+
+- Added data-driven configuration with table-driven environment variable loading.
+- Added `kc_flow_options_default()`, `kc_flow_options_load_env()`, and `kc_flow_options_free()` to the public API.
+- Refactored `kc_flow_open()` to take `kc_flow_options_t`.
+- CLI is now decoupled from `libflow`; configuration is initialized through options, then overridden by flags.
+- Env vars: `KC_FLOW_FILE`, `KC_FLOW_DIR`, and `KC_FLOW_*` overlay variables.
+- Added signal listener lifecycle: `kc_flow_on_signal()`, `kc_flow_raise_signal()`, `kc_flow_listen_signals()`, `kc_flow_listen_signal()`, and `kc_flow_signal_listener()`.
+
 ## v2.0.1
 
 - Resolved structural capture bug in `_WIN32` branch by replacing `_popen()` with native `CreateProcessA` standard handles to ensure correct `stdin` data propagation.

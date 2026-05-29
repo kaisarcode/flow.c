@@ -22,11 +22,85 @@ typedef struct kc_flow kc_flow_t;
 #define KC_FLOW_ERROR -1
 
 /**
- * Allocate one flow runtime context.
- * @param none Unused.
- * @return Context pointer or NULL on failure.
+ * Options struct for flow configuration.
  */
-kc_flow_t *kc_flow_open(void);
+typedef struct kc_flow_options {
+    int _unused;
+} kc_flow_options_t;
+
+/**
+ * Callback type for library-level signal handling.
+ * @param ctx Context pointer.
+ */
+typedef void (*kc_flow_signal_callback_t)(kc_flow_t *ctx);
+
+/**
+ * Allocate one flow runtime context.
+ * @param out Pointer to receive context pointer.
+ * @param opts Configuration options.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
+ */
+int kc_flow_open(kc_flow_t **out, const kc_flow_options_t *opts);
+
+/**
+ * Create an options struct initialized with default values.
+ * @param none Unused.
+ * @return Default-initialized options.
+ */
+kc_flow_options_t kc_flow_options_default(void);
+
+/**
+ * Load configuration from environment variables.
+ * @param opts Options to update.
+ * @return None.
+ */
+void kc_flow_options_load_env(kc_flow_options_t *opts);
+
+/**
+ * Free dynamically allocated resources within an options struct.
+ * @param opts Options to clean up.
+ * @return None.
+ */
+void kc_flow_options_free(kc_flow_options_t *opts);
+
+/**
+ * Register a handler for a library-level signal number.
+ * @param ctx Context pointer.
+ * @param sig Application-defined signal number.
+ * @param cb Callback to invoke.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
+ */
+int kc_flow_on_signal(kc_flow_t *ctx, int sig, kc_flow_signal_callback_t cb);
+
+/**
+ * Raise a library-level signal.
+ * @param ctx Context pointer.
+ * @param sig Signal number to raise.
+ * @return KC_FLOW_OK if handled, or KC_FLOW_ERROR if no handler.
+ */
+int kc_flow_raise_signal(kc_flow_t *ctx, int sig);
+
+/**
+ * Set the internal signal-listener context.
+ * @param ctx Context pointer.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR if ctx is NULL.
+ */
+int kc_flow_listen_signals(kc_flow_t *ctx);
+
+/**
+ * Wire an OS signal to the library signal listener.
+ * @param ctx Context pointer.
+ * @param sig_id OS signal number.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
+ */
+int kc_flow_listen_signal(kc_flow_t *ctx, int sig_id);
+
+/**
+ * Generic signal-listener compatible with signal() / sigaction().
+ * @param sig OS signal number.
+ * @return None.
+ */
+void kc_flow_signal_listener(int sig);
 
 /**
  * Release one flow runtime context.

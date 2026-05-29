@@ -24,10 +24,12 @@
 #ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>
+#include <signal.h>
 #else
 #include <windows.h>
 #include <io.h>
 #endif
+#include <stddef.h>
 
 #define KC_FLOW_MAX_RECORDS 2048
 #define KC_FLOW_MAX_NODES 512
@@ -110,10 +112,38 @@ typedef struct kc_flow_branches {
     size_t count;
 } kc_flow_branches_t;
 
+typedef enum {
+    KC_ENV_TYPE_INT,
+    KC_ENV_TYPE_FLOAT,
+    KC_ENV_TYPE_STR
+} kc_env_type_t;
+
+typedef struct {
+    const char *env_var;
+    size_t offset;
+    kc_env_type_t type;
+} kc_env_map_t;
+
+static const kc_env_map_t env_config_table[] = {
+    { NULL, 0, KC_ENV_TYPE_INT }
+};
+static const int env_config_table_n = 0;
+
+typedef struct {
+    int sig;
+    kc_flow_signal_callback_t cb;
+} kc_flow_signal_entry_t;
+
+static kc_flow_t *g_signal_ctx = NULL;
+
 struct kc_flow {
+    kc_flow_options_t opts;
     kc_flow_overlay_t overlays[KC_FLOW_MAX_RECORDS];
     size_t overlay_count;
     char error[KC_FLOW_ERROR_SIZE];
+    kc_flow_signal_entry_t *signal_handlers;
+    int n_signal_handlers;
+    int signal_handlers_capacity;
 };
 
 /**
@@ -3423,13 +3453,26 @@ static int kc_flow_exec_loaded(
 
 /**
  * Allocate one flow runtime context.
- * @param none Unused.
- * @return Context pointer or NULL on failure.
+ * @param out Pointer to receive context pointer.
+ * @param opts Configuration options.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-kc_flow_t *kc_flow_open(void) {
-    kc_flow_t *ctx = (kc_flow_t *)calloc(1, sizeof(kc_flow_t));
+int kc_flow_open(kc_flow_t **out, const kc_flow_options_t *opts) {
+    kc_flow_t *ctx;
 
-    return ctx;
+    if (!out || !opts) {
+        return KC_FLOW_ERROR;
+    }
+
+    ctx = (kc_flow_t *)calloc(1, sizeof(kc_flow_t));
+    if (!ctx) {
+        return KC_FLOW_ERROR;
+    }
+
+    ctx->opts = *opts;
+    *out = ctx;
+
+    return KC_FLOW_OK;
 }
 
 /**
@@ -3447,6 +3490,8 @@ void kc_flow_close(kc_flow_t *ctx) {
         free(ctx->overlays[i].key);
         free(ctx->overlays[i].value);
     }
+    kc_flow_options_free(&ctx->opts);
+    free(ctx->signal_handlers);
     free(ctx);
 }
 
@@ -3564,4 +3609,159 @@ const char *kc_flow_strerror(kc_flow_t *ctx) {
         return "unknown error";
     }
     return ctx->error;
+}
+
+/**
+ * Create an options struct initialized with default values.
+ * @param none Unused.
+ * @return Default-initialized options.
+ */
+kc_flow_options_t kc_flow_options_default(void) {
+    kc_flow_options_t opts;
+    memset(&opts, 0, sizeof(opts));
+    return opts;
+}
+
+/**
+ * Load configuration from environment variables.
+ * @param opts Options to update.
+ * @return None.
+ */
+void kc_flow_options_load_env(kc_flow_options_t *opts) {
+    int i;
+    if (!opts) return;
+    for (i = 0; i < env_config_table_n; i++) {
+        const char *val = getenv(env_config_table[i].env_var);
+        char *end;
+        if (!val) continue;
+        switch (env_config_table[i].type) {
+            case KC_ENV_TYPE_INT: {
+                long v = strtol(val, &end, 10);
+                if (end != val && *end == '\0') {
+                    *(int *)((char *)opts + env_config_table[i].offset) = (int)v;
+                }
+                break;
+            }
+            case KC_ENV_TYPE_FLOAT: {
+                float v = strtof(val, &end);
+                if (end != val && *end == '\0') {
+                    *(float *)((char *)opts + env_config_table[i].offset) = v;
+                }
+                break;
+            }
+            case KC_ENV_TYPE_STR: {
+                char **p = (char **)((char *)opts + env_config_table[i].offset);
+                free(*p);
+                *p = strdup(val);
+                break;
+            }
+        }
+    }
+}
+
+/**
+ * Free dynamically allocated resources within an options struct.
+ * @param opts Options to clean up.
+ * @return None.
+ */
+void kc_flow_options_free(kc_flow_options_t *opts) {
+    if (!opts) return;
+}
+
+/**
+ * Register a handler for a library-level signal number.
+ * @param ctx Context pointer.
+ * @param sig Application-defined signal number.
+ * @param cb Callback to invoke.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
+ */
+int kc_flow_on_signal(kc_flow_t *ctx, int sig, kc_flow_signal_callback_t cb) {
+    int i;
+    if (!ctx) return KC_FLOW_ERROR;
+    for (i = 0; i < ctx->n_signal_handlers; i++) {
+        if (ctx->signal_handlers[i].sig == sig) {
+            if (cb) {
+                ctx->signal_handlers[i].cb = cb;
+            } else {
+                int tail = ctx->n_signal_handlers - i - 1;
+                if (tail > 0) {
+                    memmove(&ctx->signal_handlers[i],
+                            &ctx->signal_handlers[i + 1],
+                            (size_t)tail * sizeof(kc_flow_signal_entry_t));
+                }
+                ctx->n_signal_handlers--;
+            }
+            return KC_FLOW_OK;
+        }
+    }
+    if (!cb) return KC_FLOW_OK;
+    if (ctx->n_signal_handlers >= ctx->signal_handlers_capacity) {
+        int new_cap = ctx->signal_handlers_capacity ? ctx->signal_handlers_capacity * 2 : 4;
+        kc_flow_signal_entry_t *p = (kc_flow_signal_entry_t *)realloc(ctx->signal_handlers,
+            (size_t)new_cap * sizeof(kc_flow_signal_entry_t));
+        if (!p) return KC_FLOW_ERROR;
+        ctx->signal_handlers = p;
+        ctx->signal_handlers_capacity = new_cap;
+    }
+    ctx->signal_handlers[ctx->n_signal_handlers].sig = sig;
+    ctx->signal_handlers[ctx->n_signal_handlers].cb = cb;
+    ctx->n_signal_handlers++;
+    return KC_FLOW_OK;
+}
+
+/**
+ * Raise a library-level signal.
+ * @param ctx Context pointer.
+ * @param sig Signal number to raise.
+ * @return KC_FLOW_OK if handled, or KC_FLOW_ERROR if no handler.
+ */
+int kc_flow_raise_signal(kc_flow_t *ctx, int sig) {
+    int i;
+    if (!ctx) return KC_FLOW_ERROR;
+    for (i = 0; i < ctx->n_signal_handlers; i++) {
+        if (ctx->signal_handlers[i].sig == sig) {
+            ctx->signal_handlers[i].cb(ctx);
+            return KC_FLOW_OK;
+        }
+    }
+    return KC_FLOW_ERROR;
+}
+
+/**
+ * Set the internal signal-listener context.
+ * @param ctx Context pointer.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR if ctx is NULL.
+ */
+int kc_flow_listen_signals(kc_flow_t *ctx) {
+    if (!ctx) return KC_FLOW_ERROR;
+    g_signal_ctx = ctx;
+    return KC_FLOW_OK;
+}
+
+/**
+ * Wire an OS signal to the library signal listener.
+ * @param ctx Context pointer.
+ * @param sig_id OS signal number.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
+ */
+int kc_flow_listen_signal(kc_flow_t *ctx, int sig_id) {
+    if (!ctx) return KC_FLOW_ERROR;
+    g_signal_ctx = ctx;
+#ifdef _WIN32
+    (void)sig_id;
+#else
+    signal(sig_id, kc_flow_signal_listener);
+#endif
+    return KC_FLOW_OK;
+}
+
+/**
+ * Generic signal-listener compatible with signal() / sigaction().
+ * @param sig OS signal number.
+ * @return None.
+ */
+void kc_flow_signal_listener(int sig) {
+    if (g_signal_ctx) {
+        kc_flow_raise_signal(g_signal_ctx, sig);
+    }
 }
