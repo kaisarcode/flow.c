@@ -112,7 +112,7 @@ static void kc_flow_cli_help(const char *name) {
     printf("    --set key=value    Append one overlay record\n");
     printf("    --unset <key>      Remove prior records for one key\n");
 
-    printf("    -h, --help         Show this help message\n");
+    printf("    -h, --help         Show this help\n");
     printf("    -v, --version      Show version\n");
 }
 
