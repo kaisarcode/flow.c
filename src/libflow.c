@@ -24,8 +24,9 @@
 #ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 #include <signal.h>
-#else
+#ifdef _WIN32
 #include <windows.h>
 #include <io.h>
 #endif
@@ -3761,7 +3762,8 @@ int kc_flow_listen_signal(kc_flow_t *ctx, int sig_id) {
  * @return None.
  */
 void kc_flow_signal_listener(int sig) {
-    if (g_signal_ctx) {
-        kc_flow_raise_signal(g_signal_ctx, sig);
-    }
+    if (g_signal_ctx && kc_flow_raise_signal(g_signal_ctx, sig) == 0)
+        return;
+    signal(sig, SIG_DFL);
+    raise(sig);
 }

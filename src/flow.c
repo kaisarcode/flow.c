@@ -23,7 +23,7 @@
 #include <io.h>
 #endif
 
-#define KC_FLOW_VERSION "2.1.0"
+#define KC_FLOW_VERSION "2.1.1"
 
 /**
  * Read standard input into memory.
