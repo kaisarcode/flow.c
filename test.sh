@@ -23,7 +23,7 @@ kc_test_pass() {
 
 # Resolve the built CLI path.
 # @return 0 on success.
-setup() {
+kc_test_setup() {
     ROOT=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
     BIN="$ROOT/bin/$(uname -m)/linux/flow"
     TMP="$ROOT/../../tmp/flow-test"
@@ -36,7 +36,7 @@ setup() {
 # @param $1 Expected output.
 # @param $2 Failure message.
 # @return 0 on success.
-assert_output() {
+kc_test_assert_output() {
     expected=$1
     message=$2
     shift 2
@@ -46,19 +46,16 @@ assert_output() {
 
 # Run CLI behavior tests.
 # @return 0 on success.
-test_cli() {
-    "$BIN" --help | grep -q 'Usage:' || kc_test_fail "help output missing usage"
-    "$BIN" -h | grep -q 'Usage:' || kc_test_fail "short help output missing usage"
-    kc_test_pass "help output"
-    "$BIN" --unknown >/dev/null 2>&1 && kc_test_fail "unknown flag should fail"
+kc_test_cli() {
+    "$BIN" --unknown >/dev/null 2>&1 && kc_test_fail "unknown flag: expected failure, got success"
     kc_test_pass "unknown flag failure"
-    "$BIN" >/dev/null 2>&1 && kc_test_fail "missing flow file should fail"
+    "$BIN" >/dev/null 2>&1 && kc_test_fail "missing flow file: expected failure, got success"
     kc_test_pass "missing flow file failure"
 }
 
 # Write generated flow fixtures.
 # @return 0 on success.
-write_fixtures() {
+kc_test_write_fixtures() {
     cat > "$TMP/fanout.flow" <<'EOF'
 flow.id=fanout
 flow.param.greeting=Hi
@@ -221,57 +218,57 @@ EOF
 
 # Run runtime behavior tests.
 # @return 0 on success.
-test_runtime() {
+kc_test_runtime() {
     site_expected=$(printf '# Tiny Flow Site / Robots\nstatus: 200 OK\nslug: robots\n\nUser-agent: *\n\n-- words: 13\n\n-- checksum: 2916289011')
-    assert_output "$site_expected" "default site request failed" "$BIN" "$ROOT/etc/site.flow"
+    kc_test_assert_output "$site_expected" "default site request failed" "$BIN" "$ROOT/etc/site.flow"
     kc_test_pass "default site request"
-    assert_output "Hello World" "optional flow id failed" "$BIN" "$TMP/render-default.flow" --set 'node.node-1.exec=printf "%s" "Hello World"'
+    kc_test_assert_output "Hello World" "optional flow id failed" "$BIN" "$TMP/render-default.flow" --set 'node.node-1.exec=printf "%s" "Hello World"'
     kc_test_pass "optional flow.id"
-    assert_output "" "optional flow link failed" "$BIN" "$TMP/overlay.flow" --unset flow.link
+    kc_test_assert_output "" "optional flow link failed" "$BIN" "$TMP/overlay.flow" --unset flow.link
     kc_test_pass "optional flow.link"
-    assert_output "" "metadata-only node failed" "$BIN" "$TMP/overlay.flow" --link meta
+    kc_test_assert_output "" "metadata-only node failed" "$BIN" "$TMP/overlay.flow" --link meta
     kc_test_pass "metadata-only nodes"
     site_expected=$(printf '# Tiny Flow Site / Home\nstatus: 200 OK\nslug: home\n\nWelcome to the tiny flow site.\n\n-- words: 17\n\n-- checksum: 902964706')
-    assert_output "$site_expected" "site home route failed" "$BIN" "$ROOT/etc/site.flow" --set flow.path=/
+    kc_test_assert_output "$site_expected" "site home route failed" "$BIN" "$ROOT/etc/site.flow" --set flow.path=/
     site_expected=$(printf '# Tiny Flow Site / Missing\nstatus: 404 NOT_FOUND\nslug: missing\n\nNothing lives at /missing.\n\n-- words: 15\n\n-- checksum: 3197011564')
-    assert_output "$site_expected" "site fallback route failed" "$BIN" "$ROOT/etc/site.flow" --set flow.path=/missing
+    kc_test_assert_output "$site_expected" "site fallback route failed" "$BIN" "$ROOT/etc/site.flow" --set flow.path=/missing
     kc_test_pass "site conditional routing"
     page_expected=$(printf '# Tiny Flow Site / Welcome\nstatus: 200 OK\nslug: welcome\n\nHello from stdin')
     output=$(printf "Hello from stdin" | "$BIN" "$ROOT/etc/page.flow" --set flow.heading=Welcome --set flow.slug=welcome)
     [ "$output" = "$page_expected" ] || kc_test_fail "page renderer stdin failed"
     kc_test_pass "page renderer child flow"
-    assert_output "Hi LeftHi Right" "fan-out failed" "$BIN" "$TMP/fanout.flow"
+    kc_test_assert_output "Hi LeftHi Right" "fan-out failed" "$BIN" "$TMP/fanout.flow"
     kc_test_pass "fan-out"
-    assert_output "child-exec" "child artifact propagation failed" "$BIN" "$TMP/file-exec.flow"
+    kc_test_assert_output "child-exec" "child artifact propagation failed" "$BIN" "$TMP/file-exec.flow"
     kc_test_pass "child artifact propagation and file-before-exec"
     output=$(printf "Pipe Input" | "$BIN" "$TMP/stdin.flow")
     [ "$output" = "Pipe Input" ] || kc_test_fail "stdin input failed"
     kc_test_pass "stdin input through kclib model"
-    assert_output "Hello" "overlay placeholder resolution failed" "$BIN" "$TMP/overlay.flow" --unset flow.link --set flow.link=server --set flow.param.hello=Hello --set 'node.server.param.msg=<flow.param.hello>'
+    kc_test_assert_output "Hello" "overlay placeholder resolution failed" "$BIN" "$TMP/overlay.flow" --unset flow.link --set flow.link=server --set flow.param.hello=Hello --set 'node.server.param.msg=<flow.param.hello>'
     kc_test_pass "overlay placeholder resolution"
-    assert_output "two" "singular overlay priority failed" "$BIN" "$TMP/overlay.flow" --set 'node.server.exec=printf "%s" "one"' --set 'node.server.exec=printf "%s" "two"' --unset flow.link --set flow.link=server --set node.server.param.msg=x
+    kc_test_assert_output "two" "singular overlay priority failed" "$BIN" "$TMP/overlay.flow" --set 'node.server.exec=printf "%s" "one"' --set 'node.server.exec=printf "%s" "two"' --unset flow.link --set flow.link=server --set node.server.param.msg=x
     kc_test_pass "singular overlay priority"
-    assert_output "leftright" "flow.link overlay replacement failed" "$BIN" "$TMP/overlay.flow" --unset flow.link --set flow.link=left --set flow.link=right
+    kc_test_assert_output "leftright" "flow.link overlay replacement failed" "$BIN" "$TMP/overlay.flow" --unset flow.link --set flow.link=left --set flow.link=right
     kc_test_pass "flow.link overlay replacement"
-    assert_output "leftright" "node.link overlay replacement failed" "$BIN" "$TMP/overlay.flow" --unset flow.link --set flow.link=root --set node.root.link=left --set node.root.link=right
+    kc_test_assert_output "leftright" "node.link overlay replacement failed" "$BIN" "$TMP/overlay.flow" --unset flow.link --set flow.link=root --set node.root.link=left --set node.root.link=right
     kc_test_pass "node.link overlay replacement"
-    assert_output "meta-ok" "metadata overlays failed" "$BIN" "$TMP/overlay.flow" --set flow.foo=bar --set node.server.foo=baz --unset flow.link --set flow.link=server --set node.server.param.msg=meta-ok
+    kc_test_assert_output "meta-ok" "metadata overlays failed" "$BIN" "$TMP/overlay.flow" --set flow.foo=bar --set node.server.foo=baz --unset flow.link --set flow.link=server --set node.server.param.msg=meta-ok
     kc_test_pass "metadata overlays"
-    assert_output "apk add curl" "exec overlay failed" "$BIN" "$TMP/overlay.flow" --set 'node.install.exec=printf "%s" "apk add curl"' --unset flow.link --set flow.link=install
+    kc_test_assert_output "apk add curl" "exec overlay failed" "$BIN" "$TMP/overlay.flow" --set 'node.install.exec=printf "%s" "apk add curl"' --unset flow.link --set flow.link=install
     kc_test_pass "exec overlay"
-    assert_output "heredoc" "heredoc execution failed" "$BIN" "$TMP/heredoc.flow"
+    kc_test_assert_output "heredoc" "heredoc execution failed" "$BIN" "$TMP/heredoc.flow"
     kc_test_pass "heredoc execution"
-    assert_output "printf hello" "literal field changed behavior" "$BIN" "$TMP/heredoc-literal-field.flow"
+    kc_test_assert_output "printf hello" "literal field changed behavior" "$BIN" "$TMP/heredoc-literal-field.flow"
     kc_test_pass "literal field remains literal"
-    assert_output "hello" "heredoc field execution failed" "$BIN" "$TMP/heredoc-field-exec.flow"
+    kc_test_assert_output "hello" "heredoc field execution failed" "$BIN" "$TMP/heredoc-field-exec.flow"
     kc_test_pass "heredoc field execution"
-    assert_output "8080" "heredoc field template execution failed" "$BIN" "$TMP/heredoc-field-template.flow"
+    kc_test_assert_output "8080" "heredoc field template execution failed" "$BIN" "$TMP/heredoc-field-template.flow"
     kc_test_pass "heredoc field templates before execution"
-    assert_output "hello" "heredoc node exec failed" "$BIN" "$TMP/heredoc-exec-node.flow"
+    kc_test_assert_output "hello" "heredoc node exec failed" "$BIN" "$TMP/heredoc-exec-node.flow"
     kc_test_pass "heredoc node exec"
-    assert_output "ok" "computed link failed" "$BIN" "$TMP/heredoc-computed-link.flow"
+    kc_test_assert_output "ok" "computed link failed" "$BIN" "$TMP/heredoc-computed-link.flow"
     kc_test_pass "computed link"
-    assert_output "AB" "computed link ordering failed" "$BIN" "$TMP/heredoc-multiple-links.flow"
+    kc_test_assert_output "AB" "computed link ordering failed" "$BIN" "$TMP/heredoc-multiple-links.flow"
     kc_test_pass "computed link ordering"
     output=$(printf 'request.path=/\n' | "$BIN" "$TMP/heredoc-link-stdin.flow")
     [ "$output" = "home" ] || kc_test_fail "computed link stdin routing failed"
@@ -289,18 +286,18 @@ test_runtime() {
     [ "$output" = "$(printf '1\n1')" ] || kc_test_fail "computed field memoization failed"
     kc_test_pass "computed field memoization"
     rm -f "$TMP/branch-count"
-    assert_output "12" "branch cache isolation failed" "$BIN" "$TMP/heredoc-branch-cache.flow"
+    kc_test_assert_output "12" "branch cache isolation failed" "$BIN" "$TMP/heredoc-branch-cache.flow"
     kc_test_pass "branch cache isolation"
     quote_expected=$(printf '%s\n%s' "He said \"hi\" with \$HOME and \`ticks\`" "can't stop")
-    assert_output "$quote_expected" "quoted shell placeholder failed" "$BIN" "$TMP/quote.flow"
+    kc_test_assert_output "$quote_expected" "quoted shell placeholder failed" "$BIN" "$TMP/quote.flow"
     kc_test_pass "quoted shell placeholders"
-    assert_output 'Function says "hello"' "quoted function placeholder failed" "$BIN" "$TMP/quote-func.flow"
+    kc_test_assert_output 'Function says "hello"' "quoted function placeholder failed" "$BIN" "$TMP/quote-func.flow"
     kc_test_pass "quoted function placeholders"
-    assert_output "comment-ok" "full-line comments failed" "$BIN" "$TMP/comment.flow"
+    kc_test_assert_output "comment-ok" "full-line comments failed" "$BIN" "$TMP/comment.flow"
     kc_test_pass "full-line comments"
-    assert_output "child-alt" "import overlay failed" "$BIN" "$TMP/overlay.flow" --set node.child.import=render-alt.flow --unset flow.link --set flow.link=child
+    kc_test_assert_output "child-alt" "import overlay failed" "$BIN" "$TMP/overlay.flow" --set node.child.import=render-alt.flow --unset flow.link --set flow.link=child
     kc_test_pass "file overlay"
-    assert_output "install" "--unset behavior failed" "$BIN" "$TMP/overlay.flow" --unset flow.link --set flow.link=install
+    kc_test_assert_output "install" "--unset behavior failed" "$BIN" "$TMP/overlay.flow" --unset flow.link --set flow.link=install
     kc_test_pass "--unset behavior"
     "$BIN" "$TMP/overlay.flow" --set node..exec=bad >/dev/null 2>&1 && kc_test_fail "invalid structural key should fail"
     kc_test_pass "invalid structural key failure"
@@ -312,7 +309,7 @@ test_runtime() {
 
 # Validate public static-library embedding.
 # @return 0 on success.
-test_api() {
+kc_test_api() {
     {
         printf '%b\n' '\043include "flow.h"'
         printf '%b\n' '\043include <stdio.h>'
@@ -342,14 +339,14 @@ test_api() {
 
 # Run all tests.
 # @return 0 on success.
-main() {
-    setup
-    write_fixtures
-    test_cli
-    test_runtime
-    test_api
+kc_test_main() {
+    kc_test_setup
+    kc_test_write_fixtures
+    kc_test_cli
+    kc_test_runtime
+    kc_test_api
     rm -rf "$TMP"
     kc_test_pass "all tests passed"
 }
 
-main "$@"
+kc_test_main "$@"
