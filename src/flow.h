@@ -11,6 +11,7 @@
 #define KC_FLOW_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -172,6 +173,12 @@ int kc_flow_exec_entry(
  * @return None.
  */
 void kc_flow_free(void *output);
+
+/**
+ * Returns the build version generated at compile time.
+ * @return Unix timestamp for the current build.
+ */
+uint64_t kc_flow_version(void);
 
 /**
  * Returns the last error message from a flow context.

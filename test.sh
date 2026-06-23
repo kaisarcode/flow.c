@@ -1,5 +1,5 @@
 #!/bin/bash
-# test.sh
+# Flow CLI and C API test harness.
 # Summary: Validation suite for flow CLI and C API runtime behavior.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com

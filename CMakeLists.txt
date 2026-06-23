@@ -3,6 +3,10 @@ project(flow C)
 
 set(CMAKE_C_STANDARD 11)
 
+if(NOT DEFINED FLOW_BUILD_VERSION)
+    set(FLOW_BUILD_VERSION 0)
+endif()
+
 option(FLOW_NATIVE "Enable native hardware optimizations" OFF)
 
 if(NOT MSVC)
@@ -14,6 +18,10 @@ if(NOT MSVC)
 else()
     add_compile_options(/O2 /W3 /WX)
 endif()
+
+set_source_files_properties(src/libflow.c PROPERTIES
+    COMPILE_DEFINITIONS KC_FLOW_BUILD_VERSION=${FLOW_BUILD_VERSION}
+)
 
 add_library(flow_static STATIC src/libflow.c)
 set_target_properties(flow_static PROPERTIES OUTPUT_NAME "flow")

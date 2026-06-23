@@ -23,8 +23,6 @@
 #include <io.h>
 #endif
 
-#define KC_FLOW_VERSION "2.1.1"
-
 /**
  * Read standard input into memory.
  * @param output Output buffer pointer.
@@ -121,7 +119,7 @@ static void kc_flow_cli_help(const char *name) {
  * @return None.
  */
 static void kc_flow_cli_version(void) {
-    printf("flow %s\n", KC_FLOW_VERSION);
+    printf("flow build %llu\n", (unsigned long long)kc_flow_version());
 }
 
 /**
