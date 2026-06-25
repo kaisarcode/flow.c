@@ -337,6 +337,38 @@ kc_test_api() {
     kc_test_pass "public C API smoke test linked against libflow.a"
 }
 
+# Tests multi-context stop isolation.
+# @return 0 on success.
+kc_test_multictx_stop() {
+    LIB_PATH="$ROOT/bin/$(uname -m)/linux/libflow.a"
+    {
+        printf '%s\n' '#include "flow.h"'
+        printf '%s\n' '#include <stdio.h>'
+        printf '%s\n' '#include <stdlib.h>'
+        printf '%s\n' 'int main(void) {'
+        printf '%s\n' '    kc_flow_options_t opts = kc_flow_options_default();'
+        printf '%s\n' '    kc_flow_t *a, *b;'
+        printf '%s\n' '    if (kc_flow_open(&a, &opts) != KC_FLOW_OK) return 1;'
+        printf '%s\n' '    if (kc_flow_open(&b, &opts) != KC_FLOW_OK) { kc_flow_close(a); return 1; }'
+        printf '%s\n' '    if (kc_flow_stop(NULL) != KC_FLOW_ERROR) { kc_flow_close(a); kc_flow_close(b); return 2; }'
+        printf '%s\n' '    if (kc_flow_stop(a) != KC_FLOW_OK) { kc_flow_close(a); kc_flow_close(b); return 3; }'
+        printf '%s\n' '    if (kc_flow_stop(b) != KC_FLOW_OK) { kc_flow_close(a); kc_flow_close(b); return 4; }'
+        printf '%s\n' '    if (kc_flow_stop(a) != KC_FLOW_OK) { kc_flow_close(a); kc_flow_close(b); return 5; }'
+        printf '%s\n' '    kc_flow_close(a);'
+        printf '%s\n' '    kc_flow_close(b);'
+        printf '%s\n' '    return 0;'
+        printf '%s\n' '}'
+    } > "$TMP/multictx.c"
+    if ! cc -I "$ROOT/src" "$TMP/multictx.c" "$LIB_PATH" -o "$TMP/multictx"; then
+        kc_test_fail "multi-context compile: expected multictx.c to compile, but compilation failed"
+    fi
+    kc_test_pass "multi-context: test program compiles successfully"
+    if ! "$TMP/multictx"; then
+        kc_test_fail "multi-context execution: expected test program to return 0, got non-zero"
+    fi
+    kc_test_pass "multi-context stop: two contexts coexist, stop is isolated"
+}
+
 # Run all tests.
 # @return 0 on success.
 kc_test_main() {
@@ -345,6 +377,7 @@ kc_test_main() {
     kc_test_cli
     kc_test_runtime
     kc_test_api
+    kc_test_multictx_stop
     rm -rf "$TMP"
     kc_test_pass "all tests passed"
 }

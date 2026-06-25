@@ -21,6 +21,7 @@ typedef struct kc_flow kc_flow_t;
 
 #define KC_FLOW_OK 0
 #define KC_FLOW_ERROR -1
+#define KC_FLOW_ESTOP -3
 
 /**
  * Options struct for flow configuration.
@@ -109,6 +110,13 @@ void kc_flow_signal_listener(int sig);
  * @return None.
  */
 void kc_flow_close(kc_flow_t *ctx);
+
+/**
+ * Request stop for a specific flow context.
+ * @param ctx Context pointer.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
+ */
+int kc_flow_stop(kc_flow_t *ctx);
 
 /**
  * Append one ordered key-value overlay operation.

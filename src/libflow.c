@@ -135,7 +135,9 @@ typedef struct {
     kc_flow_signal_callback_t cb;
 } kc_flow_signal_entry_t;
 
-static kc_flow_t *g_signal_ctx = NULL;
+static kc_flow_t **g_signal_ctx_list = NULL;
+static int g_signal_ctx_cap = 0;
+static int g_signal_ctx_count = 0;
 
 struct kc_flow {
     kc_flow_options_t opts;
@@ -145,6 +147,7 @@ struct kc_flow {
     kc_flow_signal_entry_t *signal_handlers;
     int n_signal_handlers;
     int signal_handlers_capacity;
+    volatile sig_atomic_t stop_requested;
 };
 
 /**
@@ -1271,6 +1274,7 @@ static void kc_flow_shell_quote_step(kc_flow_quote_state_t *quote, int *escaped,
 }
 
 static int kc_flow_run_command(
+    kc_flow_t *ctx,
     const char *command,
     const char *flow_path,
     const void *input,
@@ -1406,6 +1410,7 @@ static char *kc_flow_resolve_record(
         return NULL;
     }
     if (kc_flow_run_command(
+        ctx,
         command,
         flow_path,
         input,
@@ -1931,6 +1936,7 @@ static char *kc_flow_expand_call(
         size_t output_size = 0;
 
         if (kc_flow_run_command(
+            ctx,
             expanded,
             flow_path,
             NULL,
@@ -2709,6 +2715,7 @@ static int kc_flow_run_builtin(int argc, char **argv, FILE *in, FILE *out, const
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
 static int kc_flow_run_command(
+    kc_flow_t *ctx,
     const char *command,
     const char *flow_path,
     const void *input,
@@ -2734,6 +2741,8 @@ static int kc_flow_run_command(
     char **argv = NULL;
     int argc = 0;
     int builtin_rc;
+
+    if (ctx && ctx->stop_requested) return KC_FLOW_ESTOP;
 
     if (!in || !out) {
         if (in) {
@@ -2772,6 +2781,13 @@ static int kc_flow_run_command(
         }
     }
 
+    if (ctx && ctx->stop_requested) {
+        kc_flow_free_argv(argv);
+        fclose(in);
+        fclose(out);
+        return KC_FLOW_ESTOP;
+    }
+
     pid = fork();
     if (pid < 0) {
         kc_flow_free_argv(argv);
@@ -2807,13 +2823,19 @@ static int kc_flow_run_command(
     if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || (WEXITSTATUS(status) != 0 && !ignore_error)) {
         fclose(in);
         fclose(out);
-        return KC_FLOW_ERROR;
+        return ctx && ctx->stop_requested ? KC_FLOW_ESTOP : KC_FLOW_ERROR;
     }
 capture:
     fflush(out);
     rewind(out);
     while (!feof(out)) {
         size_t n = fread(chunk, 1, sizeof(chunk), out);
+        if (ctx && ctx->stop_requested) {
+            free(data);
+            fclose(in);
+            fclose(out);
+            return KC_FLOW_ESTOP;
+        }
         if (n > 0) {
             if (total + n + 1 > cap) {
                 char *next;
@@ -2848,6 +2870,10 @@ capture:
             return KC_FLOW_ERROR;
         }
     }
+    if (ctx && ctx->stop_requested) {
+        free(data);
+        return KC_FLOW_ESTOP;
+    }
     data[total] = '\0';
     *out_data = data;
     *out_size = total;
@@ -2867,6 +2893,8 @@ capture:
     (void)flow;
     (void)current_node;
     (void)node;
+
+    if (ctx && ctx->stop_requested) return KC_FLOW_ESTOP;
 
     if (!in || !out) {
         if (in) fclose(in);
@@ -2901,6 +2929,13 @@ capture:
         }
         kc_flow_free_argv(argv);
     }
+
+    if (ctx && ctx->stop_requested) {
+        fclose(in);
+        fclose(out);
+        return KC_FLOW_ESTOP;
+    }
+
     {
         HANDLE hIn = (HANDLE)_get_osfhandle(_fileno(in));
         HANDLE hOut = (HANDLE)_get_osfhandle(_fileno(out));
@@ -2947,7 +2982,7 @@ capture:
         if (exit_code != 0 && !ignore_error) {
             fclose(in);
             fclose(out);
-            return KC_FLOW_ERROR;
+            return ctx && ctx->stop_requested ? KC_FLOW_ESTOP : KC_FLOW_ERROR;
         }
     }
 capture:
@@ -2955,6 +2990,11 @@ capture:
     rewind(out);
     while (1) {
         size_t n = fread(chunk, 1, sizeof(chunk), out);
+        if (ctx && ctx->stop_requested) {
+            free(data);
+            fclose(out);
+            return KC_FLOW_ESTOP;
+        }
         if (n > 0) {
             if (total + n + 1 > cap) {
                 char *next;
@@ -2984,6 +3024,10 @@ capture:
     if (!data) {
         data = kc_flow_dup("");
         if (!data) return KC_FLOW_ERROR;
+    }
+    if (ctx && ctx->stop_requested) {
+        free(data);
+        return KC_FLOW_ESTOP;
     }
     data[total] = '\0';
     *out_data = data;
@@ -3219,7 +3263,7 @@ static int kc_flow_run_node(
             size_t out_size = 0;
             const char *ignore = kc_flow_store_get(&node_data, "ignore_error");
             int ignore_val = (ignore && strcmp(ignore, "1") == 0);
-            if (!command || kc_flow_run_command(command, flow_path, active.items[i].data, active.items[i].size, model, flow_data, node, &node_data, &out, &out_size, ignore_val) != KC_FLOW_OK) {
+            if (!command || kc_flow_run_command(ctx, command, flow_path, active.items[i].data, active.items[i].size, model, flow_data, node, &node_data, &out, &out_size, ignore_val) != KC_FLOW_OK) {
                 free(command);
                 rc = kc_flow_fail(ctx, "node command failed");
                 break;
@@ -3483,10 +3527,19 @@ int kc_flow_open(kc_flow_t **out, const kc_flow_options_t *opts) {
  */
 void kc_flow_close(kc_flow_t *ctx) {
     size_t i;
+    int j;
 
     if (!ctx) {
         return;
     }
+
+    for (j = 0; j < g_signal_ctx_count; j++) {
+        if (g_signal_ctx_list[j] == ctx) {
+            g_signal_ctx_list[j] = g_signal_ctx_list[--g_signal_ctx_count];
+            break;
+        }
+    }
+
     for (i = 0; i < ctx->overlay_count; ++i) {
         free(ctx->overlays[i].key);
         free(ctx->overlays[i].value);
@@ -3494,6 +3547,17 @@ void kc_flow_close(kc_flow_t *ctx) {
     kc_flow_options_free(&ctx->opts);
     free(ctx->signal_handlers);
     free(ctx);
+}
+
+/**
+ * Request stop for a specific flow context.
+ * @param ctx Context pointer.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
+ */
+int kc_flow_stop(kc_flow_t *ctx) {
+    if (!ctx) return KC_FLOW_ERROR;
+    ctx->stop_requested = 1;
+    return KC_FLOW_OK;
 }
 
 /**
@@ -3735,7 +3799,15 @@ int kc_flow_raise_signal(kc_flow_t *ctx, int sig) {
  */
 int kc_flow_listen_signals(kc_flow_t *ctx) {
     if (!ctx) return KC_FLOW_ERROR;
-    g_signal_ctx = ctx;
+    if (g_signal_ctx_count >= g_signal_ctx_cap) {
+        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
+        kc_flow_t **new_list = (kc_flow_t **)realloc(g_signal_ctx_list,
+            (size_t)new_cap * sizeof(kc_flow_t *));
+        if (!new_list) return KC_FLOW_ERROR;
+        g_signal_ctx_list = new_list;
+        g_signal_ctx_cap = new_cap;
+    }
+    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
     return KC_FLOW_OK;
 }
 
@@ -3747,7 +3819,15 @@ int kc_flow_listen_signals(kc_flow_t *ctx) {
  */
 int kc_flow_listen_signal(kc_flow_t *ctx, int sig_id) {
     if (!ctx) return KC_FLOW_ERROR;
-    g_signal_ctx = ctx;
+    if (g_signal_ctx_count >= g_signal_ctx_cap) {
+        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
+        kc_flow_t **new_list = (kc_flow_t **)realloc(g_signal_ctx_list,
+            (size_t)new_cap * sizeof(kc_flow_t *));
+        if (!new_list) return KC_FLOW_ERROR;
+        g_signal_ctx_list = new_list;
+        g_signal_ctx_cap = new_cap;
+    }
+    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
 #ifdef _WIN32
     (void)sig_id;
 #else
@@ -3762,8 +3842,12 @@ int kc_flow_listen_signal(kc_flow_t *ctx, int sig_id) {
  * @return None.
  */
 void kc_flow_signal_listener(int sig) {
-    if (g_signal_ctx && kc_flow_raise_signal(g_signal_ctx, sig) == 0)
-        return;
+    int i;
+    for (i = 0; i < g_signal_ctx_count; i++) {
+        if (g_signal_ctx_list[i] &&
+            kc_flow_raise_signal(g_signal_ctx_list[i], sig) == 0)
+            return;
+    }
     signal(sig, SIG_DFL);
     raise(sig);
 }
