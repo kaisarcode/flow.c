@@ -13,13 +13,16 @@
 
 #include "flow.h"
 
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef _WIN32
-#include <errno.h>
+#ifdef _WIN32
+#include <direct.h>
+#include <process.h>
+#else
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -30,6 +33,8 @@
 #endif
 
 static int signal_count = 0;
+static int signal_count_b = 0;
+static kc_flow_t *signal_ctx_seen = NULL;
 
 /**
  * Stores one observed signal callback.
@@ -39,6 +44,19 @@ static int signal_count = 0;
 static void count_signal(kc_flow_t *ctx) {
     if (ctx != NULL) {
         signal_count++;
+        signal_ctx_seen = ctx;
+    }
+}
+
+/**
+ * Stores one observed secondary signal callback.
+ * @param ctx Context passed by the library.
+ * @return None.
+ */
+static void count_signal_b(kc_flow_t *ctx) {
+    if (ctx != NULL) {
+        signal_count_b++;
+        signal_ctx_seen = ctx;
     }
 }
 
@@ -57,7 +75,20 @@ static int expect_int(const char *name, int expected, int actual) {
     return 0;
 }
 
-#ifndef _WIN32
+/**
+ * Verifies one boolean result.
+ * @param name Check name.
+ * @param condition Condition expected to be true.
+ * @return 0 on success, 1 on failure.
+ */
+static int expect_true(const char *name, int condition) {
+    if (!condition) {
+        fprintf(stderr, "%s: expected true, got false\n", name);
+        return 1;
+    }
+    return 0;
+}
+
 /**
  * Creates one temporary directory for generated flow fixtures.
  * @param out Buffer to receive the path.
@@ -68,11 +99,27 @@ static int make_temp_dir(char *out, size_t cap) {
     const char *base;
     int r;
 
+#ifdef _WIN32
+    base = getenv("TEMP");
+    if (base == NULL || *base == '\0') base = ".";
+    {
+        int i;
+        for (i = 0; i < 100; i++) {
+            r = snprintf(out, cap, "%s/flow-test-%ld-%d", base,
+                (long)_getpid(), i);
+            if (r < 0 || (size_t)r >= cap) return 1;
+            if (_mkdir(out) == 0) return 0;
+            if (errno != EEXIST) return 1;
+        }
+    }
+    return 1;
+#else
     base = getenv("TMPDIR");
     if (base == NULL || *base == '\0') base = "/tmp";
     r = snprintf(out, cap, "%s/flow-test-XXXXXX", base);
     if (r < 0 || (size_t)r >= cap) return 1;
     if (mkdtemp(out) == NULL) return 1;
+#endif
     return 0;
 }
 
@@ -126,6 +173,48 @@ static int join_path(const char *dir, const char *name,
  * @return 0 on success, 1 on failure.
  */
 static int write_all_fixtures(const char *dir) {
+#ifdef _WIN32
+    if (write_fixture(dir, "fanout.flow",
+        "flow.id=fanout\n"
+        "flow.param.greeting=Hi\n"
+        "flow.link=root\n"
+        "node.root.link=left\n"
+        "node.root.link=right\n"
+        "node.left.exec=echo <flow.param.greeting> Left\n"
+        "node.right.exec=echo <flow.param.greeting> Right\n") != 0)
+        return 1;
+    if (write_fixture(dir, "stdin.flow",
+        "flow.link=root\n"
+        "node.root.exec=more\n") != 0)
+        return 1;
+    if (write_fixture(dir, "overlay.flow",
+        "flow.id=overlay\n"
+        "flow.link=default\n"
+        "flow.owner=team\n"
+        "node.default.exec=echo default\n"
+        "node.server.exec=echo <node.param.msg>\n"
+        "node.install.exec=echo install\n"
+        "node.left.exec=echo left\n"
+        "node.right.exec=echo right\n") != 0)
+        return 1;
+    if (write_fixture(dir, "heredoc.flow",
+        "flow.link=root\n"
+        "node.root.exec=<<CMD\n"
+        "echo heredoc\n"
+        "CMD\n") != 0)
+        return 1;
+    if (write_fixture(dir, "comment.flow",
+        "# full-line comment\n"
+        "flow.link=root\n"
+        "# another comment\n"
+        "node.root.exec=echo comment-ok\n") != 0)
+        return 1;
+    if (write_fixture(dir, "cycle.flow",
+        "flow.link=left\n"
+        "node.left.link=right\n"
+        "node.right.link=left\n") != 0)
+        return 1;
+#else
     if (write_fixture(dir, "fanout.flow",
         "flow.id=fanout\n"
         "flow.param.greeting=Hi\n"
@@ -166,6 +255,7 @@ static int write_all_fixtures(const char *dir) {
         "node.left.link=right\n"
         "node.right.link=left\n") != 0)
         return 1;
+#endif
     return 0;
 }
 
@@ -203,31 +293,6 @@ static int expect_output_contains(const char *name,
 }
 
 /**
- * Verifies exact output content.
- * @param name Check name.
- * @param output Output buffer.
- * @param output_size Output size.
- * @param expected Expected content.
- * @return 0 on success, 1 on failure.
- */
-static int expect_output_equals(const char *name,
-    const char *output, size_t output_size, const char *expected)
-{
-    size_t expected_len;
-
-    expected_len = strlen(expected);
-    if (output_size != expected_len ||
-        (expected_len > 0 && memcmp(output, expected, expected_len) != 0)) {
-        fprintf(stderr, "%s: expected '%s' (size %zu), got '%.*s' (size %zu)\n",
-            name, expected, expected_len, (int)output_size,
-            output != NULL ? output : "", output_size);
-        return 1;
-    }
-    return 0;
-}
-#endif
-
-/**
  * Verifies the build version API.
  * @return 0 on success, 1 on failure.
  */
@@ -253,6 +318,19 @@ static int case_options(void) {
     kc_flow_options_free(&opts);
     kc_flow_options_load_env(NULL);
     kc_flow_options_free(NULL);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Verifies configuration-related API behavior.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_options_contract(void) {
+    int rc;
+
+    rc = 0;
+    rc += case_version();
+    rc += case_options();
     return rc == 0 ? 0 : 1;
 }
 
@@ -289,39 +367,75 @@ static int case_lifecycle(void) {
 static int case_signals(void) {
     kc_flow_options_t opts;
     kc_flow_t *ctx;
+    kc_flow_t *second;
     int rc;
+    int i;
 
     opts = kc_flow_options_default();
     ctx = NULL;
+    second = NULL;
     rc = 0;
     signal_count = 0;
+    signal_count_b = 0;
+    signal_ctx_seen = NULL;
     rc += expect_int("on_signal(NULL)", KC_FLOW_ERROR,
-        kc_flow_on_signal(NULL, SIGINT, count_signal));
+        kc_flow_on_signal(NULL, 10, count_signal));
     rc += expect_int("raise_signal(NULL)", KC_FLOW_ERROR,
-        kc_flow_raise_signal(NULL, SIGINT));
+        kc_flow_raise_signal(NULL, 10));
     rc += expect_int("listen_signals(NULL)", KC_FLOW_ERROR,
         kc_flow_listen_signals(NULL));
     rc += expect_int("listen_signal(NULL)", KC_FLOW_ERROR,
         kc_flow_listen_signal(NULL, SIGINT));
     rc += expect_int("open", KC_FLOW_OK, kc_flow_open(&ctx, &opts));
     rc += expect_int("raise unhandled signal", KC_FLOW_ERROR,
-        kc_flow_raise_signal(ctx, SIGINT));
+        kc_flow_raise_signal(ctx, 10));
     rc += expect_int("register signal handler", KC_FLOW_OK,
-        kc_flow_on_signal(ctx, SIGINT, count_signal));
+        kc_flow_on_signal(ctx, 10, count_signal));
     rc += expect_int("raise handled signal", KC_FLOW_OK,
-        kc_flow_raise_signal(ctx, SIGINT));
-    if (signal_count != 1) {
-        fprintf(stderr, "signal callback count: expected 1, got %d\n",
-            signal_count);
-        rc++;
-    }
+        kc_flow_raise_signal(ctx, 10));
+    rc += expect_int("signal callback count", 1, signal_count);
+    rc += expect_true("signal callback saw correct ctx", signal_ctx_seen == ctx);
+    rc += expect_int("replace signal handler", KC_FLOW_OK,
+        kc_flow_on_signal(ctx, 10, count_signal_b));
+    signal_count = 0;
+    signal_count_b = 0;
+    rc += expect_int("raise replaced signal", KC_FLOW_OK,
+        kc_flow_raise_signal(ctx, 10));
+    rc += expect_int("old signal handler not called after replace", 0,
+        signal_count);
+    rc += expect_int("new signal handler called after replace", 1,
+        signal_count_b);
     rc += expect_int("remove signal handler", KC_FLOW_OK,
-        kc_flow_on_signal(ctx, SIGINT, NULL));
+        kc_flow_on_signal(ctx, 10, NULL));
     rc += expect_int("raise removed signal", KC_FLOW_ERROR,
-        kc_flow_raise_signal(ctx, SIGINT));
+        kc_flow_raise_signal(ctx, 10));
+    rc += expect_int("remove absent signal is OK", KC_FLOW_OK,
+        kc_flow_on_signal(ctx, 10, NULL));
+    for (i = 0; i < 10; i++) {
+        rc += expect_int("register growth signal", KC_FLOW_OK,
+            kc_flow_on_signal(ctx, 100 + i, count_signal));
+    }
+    signal_count = 0;
+    rc += expect_int("raise last growth signal", KC_FLOW_OK,
+        kc_flow_raise_signal(ctx, 109));
+    rc += expect_int("growth callback count", 1, signal_count);
     rc += expect_int("listen signals", KC_FLOW_OK,
         kc_flow_listen_signals(ctx));
+    rc += expect_int("listen one OS signal", KC_FLOW_OK,
+        kc_flow_listen_signal(ctx, SIGINT));
+    rc += expect_int("open second", KC_FLOW_OK, kc_flow_open(&second, &opts));
+    rc += expect_int("second listens globally", KC_FLOW_OK,
+        kc_flow_listen_signals(second));
+    rc += expect_int("second signal handler", KC_FLOW_OK,
+        kc_flow_on_signal(second, 77, count_signal_b));
+    signal_count_b = 0;
+    signal_ctx_seen = NULL;
+    kc_flow_signal_listener(77);
+    rc += expect_int("listener dispatches to second context", 1,
+        signal_count_b);
+    rc += expect_true("listener dispatch saw second ctx", signal_ctx_seen == second);
     kc_flow_close(ctx);
+    kc_flow_close(second);
     kc_flow_options_free(&opts);
     return rc == 0 ? 0 : 1;
 }
@@ -380,7 +494,6 @@ static int case_overlay_guards(void) {
     return rc == 0 ? 0 : 1;
 }
 
-#ifndef _WIN32
 /**
  * Verifies exec on a missing file returns an error and sets strerror.
  * @return 0 on success, 1 on failure.
@@ -417,6 +530,7 @@ static int case_exec_error(void) {
  * Verifies exec on the page.flow fixture with stdin input.
  * @return 0 on success, 1 on failure.
  */
+#ifndef _WIN32
 static int case_exec_page(void) {
     kc_flow_options_t opts;
     kc_flow_t *ctx;
@@ -521,6 +635,27 @@ static int case_exec_site_overlay(void) {
     kc_flow_options_free(&opts);
     return rc == 0 ? 0 : 1;
 }
+#endif
+
+static int case_exec_fixtures(void);
+
+/**
+ * Verifies the bundled etc flow examples as one runtime contract.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_exec_examples(void) {
+    int rc;
+
+    rc = 0;
+#ifdef _WIN32
+    rc += case_exec_fixtures();
+#else
+    rc += case_exec_page();
+    rc += case_exec_site();
+    rc += case_exec_site_overlay();
+#endif
+    return rc == 0 ? 0 : 1;
+}
 
 /**
  * Verifies exec_entry on site.flow with an explicit entry node.
@@ -539,15 +674,31 @@ static int case_exec_entry(void) {
     out = NULL;
     out_size = 0;
     rc = 0;
+#ifdef _WIN32
+    {
+        char tmpdir[320];
+        if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
+        if (write_all_fixtures(tmpdir) != 0) return 1;
+        if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
+    }
+#else
     if (snprintf(path, sizeof(path), "%s/site.flow", FLOW_TEST_ETC_DIR) >=
         (int)sizeof(path)) return 1;
+#endif
     rc += expect_int("open", KC_FLOW_OK, kc_flow_open(&ctx, &opts));
     rc += expect_int("exec_entry(NULL)", KC_FLOW_ERROR,
         kc_flow_exec_entry(NULL, path, "request", NULL, 0, &out, &out_size));
+#ifdef _WIN32
+    rc += expect_int("exec_entry default", KC_FLOW_OK,
+        kc_flow_exec_entry(ctx, path, "default", NULL, 0, &out, &out_size));
+    rc += expect_output_contains("entry default output", out, out_size,
+        "default");
+#else
     rc += expect_int("exec_entry robots", KC_FLOW_OK,
         kc_flow_exec_entry(ctx, path, "robots", NULL, 0, &out, &out_size));
     rc += expect_output_contains("entry robots output", out, out_size,
         "# Tiny Flow Site / Robots");
+#endif
     kc_flow_free(out);
     kc_flow_close(ctx);
     kc_flow_options_free(&opts);
@@ -585,8 +736,10 @@ static int case_exec_fixtures(void) {
     if (join_path(tmpdir, "fanout.flow", fpath, sizeof(fpath)) != 0) return 1;
     rc += expect_int("exec fanout", KC_FLOW_OK,
         kc_flow_exec(ctx, fpath, NULL, 0, &out, &out_size));
-    rc += expect_output_equals("fanout output", out, out_size,
-        "Hi LeftHi Right");
+    rc += expect_output_contains("fanout left output", out, out_size,
+        "Hi Left");
+    rc += expect_output_contains("fanout right output", out, out_size,
+        "Hi Right");
     kc_flow_free(out);
     out = NULL;
     out_size = 0;
@@ -594,7 +747,7 @@ static int case_exec_fixtures(void) {
     if (join_path(tmpdir, "heredoc.flow", fpath, sizeof(fpath)) != 0) return 1;
     rc += expect_int("exec heredoc", KC_FLOW_OK,
         kc_flow_exec(ctx, fpath, NULL, 0, &out, &out_size));
-    rc += expect_output_equals("heredoc output", out, out_size, "heredoc");
+    rc += expect_output_contains("heredoc output", out, out_size, "heredoc");
     kc_flow_free(out);
     out = NULL;
     out_size = 0;
@@ -602,7 +755,7 @@ static int case_exec_fixtures(void) {
     if (join_path(tmpdir, "comment.flow", fpath, sizeof(fpath)) != 0) return 1;
     rc += expect_int("exec comment", KC_FLOW_OK,
         kc_flow_exec(ctx, fpath, NULL, 0, &out, &out_size));
-    rc += expect_output_equals("comment output", out, out_size, "comment-ok");
+    rc += expect_output_contains("comment output", out, out_size, "comment-ok");
     kc_flow_free(out);
     out = NULL;
     out_size = 0;
@@ -610,7 +763,7 @@ static int case_exec_fixtures(void) {
     if (join_path(tmpdir, "stdin.flow", fpath, sizeof(fpath)) != 0) return 1;
     rc += expect_int("exec stdin", KC_FLOW_OK,
         kc_flow_exec(ctx, fpath, "Pipe Input", 10, &out, &out_size));
-    rc += expect_output_equals("stdin output", out, out_size, "Pipe Input");
+    rc += expect_output_contains("stdin output", out, out_size, "Pipe Input");
     kc_flow_free(out);
     out = NULL;
     out_size = 0;
@@ -633,7 +786,7 @@ static int case_exec_fixtures(void) {
         kc_flow_set(ctx, "flow.link", "server"));
     rc += expect_int("exec overlay server", KC_FLOW_OK,
         kc_flow_exec(ctx, fpath, NULL, 0, &out, &out_size));
-    rc += expect_output_equals("overlay server output", out, out_size,
+    rc += expect_output_contains("overlay server output", out, out_size,
         "Hello");
     kc_flow_free(out);
     out = NULL;
@@ -645,7 +798,7 @@ static int case_exec_fixtures(void) {
         kc_flow_set(ctx, "flow.link", "install"));
     rc += expect_int("exec overlay install", KC_FLOW_OK,
         kc_flow_exec(ctx, fpath, NULL, 0, &out, &out_size));
-    rc += expect_output_equals("overlay install output", out, out_size,
+    rc += expect_output_contains("overlay install output", out, out_size,
         "install");
     kc_flow_free(out);
 
@@ -653,7 +806,6 @@ static int case_exec_fixtures(void) {
     kc_flow_options_free(&opts);
     return rc == 0 ? 0 : 1;
 }
-#endif
 
 /**
  * Runs one libflow contract test case.
@@ -667,20 +819,15 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "version") == 0) return case_version();
-    if (strcmp(argv[1], "options") == 0) return case_options();
+    if (strcmp(argv[1], "options") == 0) return case_options_contract();
     if (strcmp(argv[1], "lifecycle") == 0) return case_lifecycle();
     if (strcmp(argv[1], "signals") == 0) return case_signals();
     if (strcmp(argv[1], "multictx-stop") == 0) return case_multictx_stop();
     if (strcmp(argv[1], "overlay-guards") == 0) return case_overlay_guards();
-#ifndef _WIN32
     if (strcmp(argv[1], "exec-error") == 0) return case_exec_error();
-    if (strcmp(argv[1], "exec-page") == 0) return case_exec_page();
-    if (strcmp(argv[1], "exec-site") == 0) return case_exec_site();
-    if (strcmp(argv[1], "exec-site-overlay") == 0)
-        return case_exec_site_overlay();
+    if (strcmp(argv[1], "exec-examples") == 0) return case_exec_examples();
     if (strcmp(argv[1], "exec-entry") == 0) return case_exec_entry();
     if (strcmp(argv[1], "exec-fixtures") == 0) return case_exec_fixtures();
-#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

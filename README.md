@@ -227,28 +227,41 @@ Run the included cohesive examples:
 ```c
 #include "flow.h"
 
-kc_flow_t *ctx = kc_flow_open();
+kc_flow_options_t opts = kc_flow_options_default();
+kc_flow_t *ctx = NULL;
 char *output = NULL;
 size_t output_size = 0;
 
+kc_flow_open(&ctx, &opts);
 kc_flow_set(ctx, "flow.hello", "Hello");
 kc_flow_exec(ctx, "etc/page.flow", NULL, 0, &output, &output_size);
 
 kc_flow_free(output);
 kc_flow_close(ctx);
+kc_flow_options_free(&opts);
 ```
 
 ---
 
 ## Lifecycle
 
+- `kc_flow_options_default()` - creates a default options struct.
+- `kc_flow_options_load_env()` - overlays options from environment variables.
+- `kc_flow_options_free()` - releases resources owned by options.
 - `kc_flow_open()` - allocates and returns a new context owned by the caller.
 - `kc_flow_set()` - appends one ordered set overlay.
 - `kc_flow_unset()` - appends one ordered unset overlay.
-
 - `kc_flow_exec()` - executes a flow file from its declared entries.
 - `kc_flow_exec_entry()` - executes a flow file from one explicit entry node.
 - `kc_flow_free()` - releases output data owned by the library.
+- `kc_flow_strerror()` - returns the last context error message.
+- `kc_flow_stop()` - requests stop for a context.
+- `kc_flow_on_signal()` - registers or removes application-defined signal handlers.
+- `kc_flow_raise_signal()` - raises an application-defined signal on a context.
+- `kc_flow_listen_signals()` - registers a context with the global signal listener.
+- `kc_flow_listen_signal()` - wires an OS signal to the global listener.
+- `kc_flow_signal_listener()` - dispatches a signal to registered contexts.
+- `kc_flow_version()` - returns the build version.
 - `kc_flow_close()` - releases the context and all associated resources.
 
 ---
