@@ -9,6 +9,17 @@ ANDROID_HOME  ?= $(HOME)/.local/share/android-sdk
 NDK_VERSION   ?= 27.2.12479018
 NDK_DIR := $(ANDROID_HOME)/ndk/$(NDK_VERSION)
 NDK_TOOLCHAIN := $(NDK_DIR)/build/cmake/android.toolchain.cmake
+XDG_DATA_HOME ?= $(HOME)/.local/share
+OSXCROSS_ROOT ?= $(XDG_DATA_HOME)/osxcross/target
+MACOSX_DEPLOYMENT_TARGET ?= 11.0
+IOS_DEPLOYMENT_TARGET ?= 13.0
+IPHONEOS_SDK ?= $(shell ls -d "$(OSXCROSS_ROOT)"/SDK/iPhoneOS*.sdk 2>/dev/null | sort -V | tail -n 1)
+IPHONESIMULATOR_SDK ?= $(shell ls -d "$(OSXCROSS_ROOT)"/SDK/iPhoneSimulator*.sdk 2>/dev/null | sort -V | tail -n 1)
+OSXCROSS_X86_64_CC := $(OSXCROSS_ROOT)/bin/o64-clang
+OSXCROSS_AARCH64_CC := $(OSXCROSS_ROOT)/bin/oa64-clang
+OSXCROSS_IOS_AARCH64_CC := $(OSXCROSS_ROOT)/bin/ios64-clang
+OSXCROSS_IOSSIM_AARCH64_CC := $(OSXCROSS_ROOT)/bin/iossim64-clang
+OSXCROSS_IOSSIM_X86_64_CC := $(OSXCROSS_ROOT)/bin/iossimx64-clang
 WINE ?= wine
 WINE_X86_64_CC ?= x86_64-w64-mingw32-gcc
 
@@ -110,9 +121,10 @@ endif
 .DEFAULT_GOAL := native
 
 .PHONY: native all test wine clean \
-	x86_64/linux x86_64/windows \
+	x86_64/linux x86_64/windows x86_64/macos \
+	x86_64/iossim \
 	i686/linux i686/windows \
-	aarch64/linux aarch64/android \
+	aarch64/linux aarch64/android aarch64/macos aarch64/ios aarch64/iossim \
 	armv7/linux armv7/android \
 	armv7hf/linux \
 	riscv64/linux \
@@ -129,9 +141,10 @@ native:
 	@$(MAKE) BUILD_VERSION=$(BUILD_VERSION) $(NATIVE_TARGET)
 
 all: \
-	x86_64/linux x86_64/windows \
+	x86_64/linux x86_64/windows x86_64/macos \
+	x86_64/iossim \
 	i686/linux i686/windows \
-	aarch64/linux aarch64/android \
+	aarch64/linux aarch64/android aarch64/macos aarch64/ios aarch64/iossim \
 	armv7/linux armv7/android \
 	armv7hf/linux \
 	riscv64/linux \
@@ -222,6 +235,88 @@ x86_64/windows:
 
 i686/windows:
 	$(call windows_target,i686,i686-w64-mingw32-gcc)
+
+## macOS
+
+define macos_target
+	@mkdir -p $(BIN_DIR)/$(1)/macos
+	@if [ ! -x $(2) ]; then \
+		echo "Missing macOS cross-compiler wrapper: $(2)" >&2; \
+		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
+		exit 1; \
+	fi
+	@if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
+		PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Darwin \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
+			-DFLOW_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_C_COMPILER=$(2) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) -DFLOW_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -G Ninja -Wno-dev > /dev/null,PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
+	@cp $(BUILD_DIR)/$(1)-macos/out/flow $(BIN_DIR)/$(1)/macos/flow
+	@echo "OK $(1)/macos"
+endef
+
+x86_64/macos:
+	$(call macos_target,x86_64,$(OSXCROSS_X86_64_CC))
+
+aarch64/macos:
+	$(call macos_target,aarch64,$(OSXCROSS_AARCH64_CC))
+
+## iOS
+
+define ios_target
+	@mkdir -p $(BIN_DIR)/$(1)/$(2)
+	@if [ ! -x $(3) ]; then \
+		echo "Missing iOS cross-compiler wrapper: $(3)" >&2; \
+		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
+		exit 1; \
+	fi
+	@if [ -z "$(5)" ] || [ ! -d "$(5)" ]; then \
+		echo "Missing iOS SDK sysroot: $(5)" >&2; \
+		echo "Set $(4) to an installed Apple SDK directory." >&2; \
+		exit 1; \
+	fi
+	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/build.ninja ]; then \
+		PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-$(2) \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=iOS \
+			-DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) \
+			-DCMAKE_OSX_SYSROOT=$(5) \
+			-DCMAKE_OSX_ARCHITECTURES=$(6) \
+			-DFLOW_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_C_COMPILER=$(3) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_SYSROOT=$(5) -DCMAKE_OSX_ARCHITECTURES=$(6) -DFLOW_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(3) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null,PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
+	@if [ -f $(BUILD_DIR)/$(1)-$(2)/out/flow ]; then \
+		cp $(BUILD_DIR)/$(1)-$(2)/out/flow $(BIN_DIR)/$(1)/$(2)/flow; \
+	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/flow.app/flow ]; then \
+		cp $(BUILD_DIR)/$(1)-$(2)/out/flow.app/flow $(BIN_DIR)/$(1)/$(2)/flow; \
+	else \
+		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
+		exit 1; \
+	fi
+	@echo "OK $(1)/$(2)"
+endef
+
+aarch64/ios:
+	$(call ios_target,aarch64,ios,$(OSXCROSS_IOS_AARCH64_CC),IPHONEOS_SDK,$(IPHONEOS_SDK),arm64)
+
+aarch64/iossim:
+	$(call ios_target,aarch64,iossim,$(OSXCROSS_IOSSIM_AARCH64_CC),IPHONESIMULATOR_SDK,$(IPHONESIMULATOR_SDK),arm64)
+
+x86_64/iossim:
+	$(call ios_target,x86_64,iossim,$(OSXCROSS_IOSSIM_X86_64_CC),IPHONESIMULATOR_SDK,$(IPHONESIMULATOR_SDK),x86_64)
 
 ## Android
 

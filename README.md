@@ -302,10 +302,15 @@ The project is prepared to build artifacts for multiple architectures under `bin
 make all
 make x86_64/linux
 make x86_64/windows
+make x86_64/macos
+make x86_64/iossim
 make i686/linux
 make i686/windows
 make aarch64/linux
 make aarch64/android
+make aarch64/macos
+make aarch64/ios
+make aarch64/iossim
 make armv7/linux
 make armv7/android
 make armv7hf/linux
