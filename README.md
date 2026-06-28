@@ -333,6 +333,41 @@ For rendering visual graph representations of `.flow` documents, you can check t
 
 ---
 
+## Development Requirements
+
+### Build Tools
+
+- `make` (GNU Make)
+- `cmake` >= 3.14
+- `ninja`
+- `gcc` or `clang` (C11 compatible)
+
+### System Libraries
+
+Linux:
+- No additional system libraries required.
+
+Windows (MSVC or MinGW):
+- No additional system libraries required.
+
+macOS / iOS:
+- No additional system libraries required.
+
+### Optional Cross-Compilation SDKs
+
+Required only for multiarch builds:
+
+- MinGW (`x86_64-w64-mingw32-gcc`) for Windows cross-compilation from Linux.
+- `wine` for running Windows tests on Linux.
+- `osxcross` with macOS and iOS SDKs for macOS and iOS targets.
+- Android NDK (version 27.2.12479018) for Android targets.
+
+### Test Dependencies
+
+- `ctest` (included with cmake)
+
+---
+
 ## Beta Notice
 
 This is a beta project tested only on Debian x86_64. It was created out of a personal need for these libraries, but no guarantees are provided regarding its stability or future support. You are free to test it, use it, and modify it as you please.
