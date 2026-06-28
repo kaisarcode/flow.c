@@ -29,7 +29,7 @@ BUILD_VERSION ?= $(shell date +%s)
 
 define cmake_build
 	@prelog=$$(mktemp); \
-	if ! cmake --build $(1) -- -n > "$$prelog" 2>&1; then \
+	if ! $(3) cmake --build $(1) -- -n > "$$prelog" 2>&1; then \
 		cat "$$prelog"; \
 		rm -f "$$prelog"; \
 		exit 1; \
@@ -37,7 +37,7 @@ define cmake_build
 	if grep -q "ninja: no work to do." "$$prelog"; then \
 		rm -f "$$prelog"; \
 		out=$$(mktemp); \
-		cmake --build $(1) 2>"$$out"; \
+		$(3) cmake --build $(1) 2>"$$out"; \
 		r=$$?; \
 		if [ -s "$$out" ]; then grep -v 'skipping incompatible' < "$$out"; fi; \
 		rm -f "$$out"; \
@@ -45,7 +45,7 @@ define cmake_build
 	fi; \
 	rm -f "$$prelog"; \
 	out=$$(mktemp); \
-	cmake --build $(1) 2>"$$out"; \
+	$(3) cmake --build $(1) 2>"$$out"; \
 	r=$$?; \
 	if [ -s "$$out" ]; then grep -v 'skipping incompatible' < "$$out"; fi; \
 	rm -f "$$out"; \
@@ -56,7 +56,7 @@ define cmake_build
 		ver=$$(date +%s); \
 		$(2); \
 		log=$$(mktemp); \
-		if ! cmake --build $(1) > "$$log" 2>&1; then \
+		if ! $(3) cmake --build $(1) > "$$log" 2>&1; then \
 			cat "$$log"; \
 			rm -f "$$log"; \
 			exit 1; \
@@ -245,21 +245,28 @@ define macos_target
 		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
 		exit 1; \
 	fi
-	@if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
-		PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos \
+	@export OSXCROSS_HOST=$(1)-apple-darwin25.1 && \
+	export OSXCROSS_TARGET_DIR=$(OSXCROSS_ROOT) && \
+	export OSXCROSS_TARGET=darwin25.1 && \
+	export OSXCROSS_SDK=$(OSXCROSS_ROOT)/SDK/MacOSX26.1.sdk && \
+	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
+	if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
+		cmake -S . -B $(BUILD_DIR)/$(1)-macos \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Darwin \
 			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
 			-DFLOW_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(2) \
+			-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
+			-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out \
 			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
 			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
 			-G Ninja -Wno-dev > /dev/null; \
-	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) -DFLOW_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -G Ninja -Wno-dev > /dev/null,PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
-	@cp $(BUILD_DIR)/$(1)-macos/out/flow $(BIN_DIR)/$(1)/macos/flow
-	@echo "OK $(1)/macos"
+	fi && \
+	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
+	cp $(BUILD_DIR)/$(1)-macos/out/flow $(BIN_DIR)/$(1)/macos/flow && \
+	echo "OK $(1)/macos"
 endef
 
 x86_64/macos:
